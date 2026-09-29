@@ -1,0 +1,6 @@
+{
+  "name": "Synapse Workspace",
+  "description": "Clean, modern document management and workspace hub with seamless dark and light modes, list and grid views, and keyboard navigation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
