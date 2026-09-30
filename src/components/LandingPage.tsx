@@ -139,7 +139,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             setIsLoading(false);
             return;
           }
-          setAuthError(signUpError.message);
+          if (
+            signUpError.message.toLowerCase().includes('already registered') ||
+            signUpError.message.toLowerCase().includes('already exists') ||
+            signInError.message.toLowerCase().includes('invalid login credentials')
+          ) {
+            setAuthError(
+              'Incorrect password for this email account. If you forgot your password, please click "Forgot password?" below to reset it.'
+            );
+          } else {
+            setAuthError(signUpError.message);
+          }
           setIsLoading(false);
           return;
         }
@@ -283,9 +293,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {/* Error Banner */}
           {authError && (
-            <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{authError}</span>
+            <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                <span className="leading-tight">{authError}</span>
+              </div>
+              {authError.toLowerCase().includes('password') && (
+                <button
+                  type="button"
+                  onClick={() => setIsForgotPasswordOpen(true)}
+                  className="px-2 py-1 text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/50 hover:bg-red-200 dark:hover:bg-red-800 rounded-lg transition-colors cursor-pointer shrink-0 border border-red-200 dark:border-red-800"
+                >
+                  Reset Password →
+                </button>
+              )}
             </div>
           )}
 
