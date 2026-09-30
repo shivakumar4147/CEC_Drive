@@ -7,18 +7,86 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. PROFILES TABLE (User Roles: admin, uploader/lecturer, student)
 CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'uploader', 'student')),
+    
+    -- Student Specific Fields
+    usn TEXT,
+    academic_year TEXT,
     department TEXT DEFAULT 'CSE',
-    section TEXT DEFAULT 'Section A',
+    semester TEXT DEFAULT '5th Sem',
+    section TEXT DEFAULT 'Sec A',
+    
+    -- Lecturer / Uploader Specific Fields
+    course TEXT,
+    
+    -- Aesthetic & System Metadata
     initial TEXT,
     bg_color TEXT DEFAULT 'bg-blue-600',
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. FOLDERS TABLE (Hierarchical Directory: Year > Sem > Dept > Section > Subject)
+-- 2. AUTOMATIC SUPABASE AUTH TRIGGER
+-- Automatically creates/upserts a public.profiles record whenever a user signs up/in via Supabase Auth
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.profiles (
+        id,
+        email,
+        name,
+        role,
+        usn,
+        academic_year,
+        department,
+        semester,
+        section,
+        course,
+        initial,
+        bg_color
+    ) VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+        COALESCE(NEW.raw_user_meta_data->>'role', 'student'),
+        NEW.raw_user_meta_data->>'usn',
+        NEW.raw_user_meta_data->>'academic_year',
+        COALESCE(NEW.raw_user_meta_data->>'department', 'CSE'),
+        COALESCE(NEW.raw_user_meta_data->>'semester', '5th Sem'),
+        COALESCE(NEW.raw_user_meta_data->>'section', 'Sec A'),
+        NEW.raw_user_meta_data->>'course',
+        UPPER(SUBSTRING(COALESCE(NEW.raw_user_meta_data->>'name', 'U'), 1, 1)),
+        CASE 
+            WHEN (NEW.raw_user_meta_data->>'role') = 'uploader' THEN 'bg-amber-600'
+            WHEN (NEW.raw_user_meta_data->>'role') = 'admin' THEN 'bg-purple-600'
+            ELSE 'bg-blue-600'
+        END
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        email = EXCLUDED.email,
+        name = EXCLUDED.name,
+        role = EXCLUDED.role,
+        usn = EXCLUDED.usn,
+        academic_year = EXCLUDED.academic_year,
+        department = EXCLUDED.department,
+        semester = EXCLUDED.semester,
+        section = EXCLUDED.section,
+        course = EXCLUDED.course,
+        updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Attach trigger to auth.users table
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT OR UPDATE ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 3. FOLDERS TABLE (Hierarchical Directory: Year > Sem > Dept > Section > Subject)
 CREATE TABLE IF NOT EXISTS public.folders (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -28,7 +96,7 @@ CREATE TABLE IF NOT EXISTS public.folders (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. DOCUMENTS TABLE (Academic Notes, PPTs, Exam Papers, Assignments)
+-- 4. DOCUMENTS TABLE (Academic Notes, PPTs, Exam Papers, Assignments)
 CREATE TABLE IF NOT EXISTS public.documents (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -45,7 +113,7 @@ CREATE TABLE IF NOT EXISTS public.documents (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. ANNOUNCEMENTS / NOTICES TABLE
+-- 5. ANNOUNCEMENTS / NOTICES TABLE
 CREATE TABLE IF NOT EXISTS public.announcements (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT NOT NULL,
@@ -55,7 +123,7 @@ CREATE TABLE IF NOT EXISTS public.announcements (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Enable Row Level Security (RLS) & Public Read Access Policies
+-- Enable Row Level Security (RLS) & Public Read/Write Access Policies
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.folders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
@@ -70,14 +138,6 @@ CREATE POLICY "Public announcements policy" ON public.announcements FOR ALL USIN
 -- ==========================================
 -- SEED DATA (INITIAL ACADEMIC DIRECTORY & NOTES)
 -- ==========================================
-
--- Seed Initial Profiles
-INSERT INTO public.profiles (id, name, email, role, department, section, initial, bg_color)
-VALUES 
-    ('a1111111-1111-1111-1111-111111111111', 'Shiva Student', 'shiva@student.cec.edu.in', 'student', 'CSE', 'Section A', 'S', 'bg-blue-600'),
-    ('b2222222-2222-2222-2222-222222222222', 'Prof. Sharma', 'sharma@lecturer.cec.edu.in', 'uploader', 'CSE', 'Section A', 'S', 'bg-amber-600'),
-    ('c3333333-3333-3333-3333-333333333333', 'CEC Admin', 'admin@cec.edu.in', 'admin', 'System Wide', 'All Sections', 'A', 'bg-purple-600')
-ON CONFLICT (email) DO NOTHING;
 
 -- Seed Academic Years
 INSERT INTO public.folders (id, name, parent_id, file_count, total_size) VALUES

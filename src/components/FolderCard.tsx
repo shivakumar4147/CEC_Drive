@@ -1,77 +1,118 @@
-import React from 'react';
-import { Check } from 'lucide-react';
+import React, { useRef } from 'react';
 import { FolderIcon3D } from './FolderIcon3D';
 import { FolderItem } from '../types';
 
 interface FolderCardProps {
   folder: FolderItem;
   isSelected?: boolean;
-  onToggleSelect?: (folderId: string) => void;
+  hasActiveSelection?: boolean;
+  onToggleSelect?: (folderId: string, multiSelect?: boolean) => void;
   onClick?: (folderId: string) => void;
 }
 
 export const FolderCard: React.FC<FolderCardProps> = ({
   folder,
   isSelected = false,
+  hasActiveSelection = false,
   onToggleSelect,
   onClick,
 }) => {
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isLongPressTriggeredRef = useRef(false);
+
+  // Mobile Long-Press Gesture Handlers (500ms touch hold)
+  const handleTouchStart = () => {
+    const isMobile = window.innerWidth < 768;
+    if (!isMobile) return;
+
+    isLongPressTriggeredRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      isLongPressTriggeredRef.current = true;
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(40);
+        } catch (e) {
+          // ignore vibration restriction
+        }
+      }
+      onToggleSelect && onToggleSelect(folder.id, true);
+    }, 500);
+  };
+
+  const handleTouchEndOrCancel = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    const isMobile = window.innerWidth < 768;
+
+    if (isMobile) {
+      if (isLongPressTriggeredRef.current) {
+        isLongPressTriggeredRef.current = false;
+        return;
+      }
+      if (hasActiveSelection || isSelected) {
+        onToggleSelect && onToggleSelect(folder.id, true);
+      } else {
+        onClick && onClick(folder.id);
+      }
+    } else {
+      // PC View: Click to select single, Ctrl + Click for multi-select
+      const isMulti = e.ctrlKey || e.metaKey;
+      onToggleSelect && onToggleSelect(folder.id, isMulti);
+    }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    const isMobile = window.innerWidth < 768;
+    if (!isMobile) {
+      onClick && onClick(folder.id);
+    }
+  };
+
   return (
     <div
-      onClick={() => onClick && onClick(folder.id)}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEndOrCancel}
+      onTouchMove={handleTouchEndOrCancel}
+      onTouchCancel={handleTouchEndOrCancel}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (e.key === 'Enter') {
           e.preventDefault();
           onClick && onClick(folder.id);
+        } else if (e.key === ' ') {
+          e.preventDefault();
+          const isMulti = e.ctrlKey || e.metaKey;
+          onToggleSelect && onToggleSelect(folder.id, isMulti);
         }
       }}
-      className={`relative group flex flex-col items-center justify-between p-6 rounded-2xl border transition-all duration-200 cursor-pointer text-center select-none ${
+      className={`relative group flex flex-col items-center justify-center p-2.5 sm:p-3 rounded-xl transition-all duration-150 cursor-pointer text-center select-none ${
         isSelected
-          ? 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-400 dark:border-blue-600 shadow-sm'
-          : 'bg-white dark:bg-[#0a0a0a] border-neutral-200/80 dark:border-neutral-800/80 hover:border-neutral-300 dark:hover:border-neutral-700 hover:shadow-xs'
+          ? 'bg-blue-100/80 dark:bg-blue-900/50 text-blue-900 dark:text-blue-100 ring-2 ring-blue-500/60 shadow-xs'
+          : 'hover:bg-neutral-100/80 dark:hover:bg-neutral-800/60 text-neutral-800 dark:text-neutral-200'
       }`}
     >
-      {/* Top Left Selection Radio/Circle */}
-      <div className="w-full flex justify-start items-center">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSelect && onToggleSelect(folder.id);
-          }}
-          className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
-            isSelected
-              ? 'bg-blue-600 border-blue-600 text-white'
-              : 'border-neutral-300 dark:border-neutral-700 group-hover:border-neutral-400 dark:group-hover:border-neutral-500 bg-transparent'
-          }`}
-          aria-label={`Select folder ${folder.name}`}
-          aria-checked={isSelected}
-          role="checkbox"
-        >
-          {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-        </button>
+      {/* Folder Icon (Windows File Explorer Style) */}
+      <div className="my-1 flex items-center justify-center transition-transform duration-150 group-hover:scale-105">
+        <FolderIcon3D className="w-14 h-11 sm:w-16 sm:h-13 drop-shadow-xs" />
       </div>
 
-      {/* 3D Realistic Royal Blue Folder */}
-      <div className="my-3 transition-transform duration-200 group-hover:scale-105">
-        <FolderIcon3D className="w-20 h-16 sm:w-24 sm:h-20 drop-shadow-md" />
-      </div>
-
-      {/* Folder Name & Info */}
-      <div className="w-full mt-1">
-        <h3 className="text-sm font-semibold text-neutral-900 dark:text-white truncate">
-          {folder.name}
-        </h3>
-        <p className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-          <span className="font-mono tabular-nums">{folder.fileCount} Files</span>
-          <span className="mx-1.5" aria-hidden="true">
-            •
-          </span>
-          <span className="font-mono tabular-nums">{folder.totalSize}</span>
-        </p>
-      </div>
+      {/* Folder Name Below Icon */}
+      <span className="w-full text-xs font-semibold text-neutral-800 dark:text-neutral-200 truncate px-1 mt-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+        {folder.name}
+      </span>
+      {folder.fileCount !== undefined && (
+        <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono mt-0.5">
+          {folder.fileCount} {folder.fileCount === 1 ? 'file' : 'files'}
+        </span>
+      )}
     </div>
   );
 };

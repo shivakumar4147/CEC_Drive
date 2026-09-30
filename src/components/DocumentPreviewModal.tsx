@@ -82,7 +82,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               <User className="w-4 h-4 text-neutral-400" />
               <span>Author:</span>
               <span className="font-medium text-neutral-900 dark:text-white truncate">
-                {document.author?.name || 'Prof. Sharma'}
+                {document.author.name}
               </span>
             </div>
 

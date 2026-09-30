@@ -45,6 +45,9 @@ export type ThemeMode = 'light' | 'dark';
 export type ActiveNavKey =
   | 'dashboard'
   | 'calendar'
+  | 'pinned-folders'
+  | 'recent-files'
+  | 'announcements'
   | 'inbox'
   | 'my-tasks'
   | 'folders'

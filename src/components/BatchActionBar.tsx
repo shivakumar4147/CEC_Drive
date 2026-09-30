@@ -7,6 +7,7 @@ interface BatchActionBarProps {
   onDownloadSelected: () => void;
   onMarkImportant: () => void;
   onDeleteSelected: () => void;
+  canDelete?: boolean;
 }
 
 export const BatchActionBar: React.FC<BatchActionBarProps> = ({
@@ -15,6 +16,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
   onDownloadSelected,
   onMarkImportant,
   onDeleteSelected,
+  canDelete = true,
 }) => {
   if (selectedCount === 0) return null;
 
@@ -30,7 +32,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
       <div className="flex items-center gap-1.5">
         <button
           onClick={onDownloadSelected}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
         >
           <Download className="w-3.5 h-3.5" />
           <span>Download</span>
@@ -38,19 +40,21 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
 
         <button
           onClick={onMarkImportant}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
         >
           <Star className="w-3.5 h-3.5 text-amber-400" />
           <span>Important</span>
         </button>
 
-        <button
-          onClick={onDeleteSelected}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-rose-400 hover:bg-rose-950/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          <span>Delete</span>
-        </button>
+        {canDelete && (
+          <button
+            onClick={onDeleteSelected}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-rose-400 hover:bg-rose-950/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete</span>
+          </button>
+        )}
       </div>
 
       <button

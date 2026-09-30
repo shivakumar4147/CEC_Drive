@@ -2,18 +2,19 @@ import React, { useState } from 'react';
 import {
   LayoutGrid,
   Calendar,
-  Inbox,
-  CheckCircle2,
+  Pin,
+  Clock,
+  Megaphone,
   ChevronRight,
   ChevronDown,
   Folder as FolderIcon,
   FolderOpen,
   PanelLeftClose,
+  X,
   Sun,
   Moon,
   ShieldCheck,
   UploadCloud,
-  UserCheck,
 } from 'lucide-react';
 import { SynapseLogo } from './SynapseLogo';
 import { ActiveNavKey, ThemeMode, FolderItem, UserRole, UserProfile } from '../types';
@@ -26,18 +27,20 @@ interface SidebarProps {
   theme: ThemeMode;
   onToggleTheme: () => void;
   currentUser: UserProfile;
-  onSwitchRole: (newRole: UserRole) => void;
+  onSwitchRole?: (newRole: UserRole) => void;
   folders?: FolderItem[];
+  pinnedFolderIds?: string[];
   currentFolderId?: string | null;
   onNavigateFolder?: (folderId: string | null) => void;
-  counts?: {
-    dashboard?: number;
-    calendar?: number;
-    inbox?: number;
-    myTasks?: number;
-    folders?: number;
-    important?: number;
-    normal?: number;
+  notifications?: {
+    dashboard?: boolean;
+    calendar?: boolean;
+    pinned?: boolean;
+    recent?: boolean;
+    announcements?: boolean;
+    folders?: boolean;
+    important?: boolean;
+    normal?: boolean;
   };
 }
 
@@ -49,24 +52,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
   theme,
   onToggleTheme,
   currentUser,
-  onSwitchRole,
   folders = [],
+  pinnedFolderIds = [],
   currentFolderId = null,
   onNavigateFolder,
-  counts = {
-    dashboard: 48,
-    calendar: 12,
-    inbox: 127,
-    myTasks: 21,
-    folders: 12,
-    important: 12,
-    normal: 47,
+  notifications = {
+    dashboard: false,
+    calendar: true,
+    pinned: true,
+    recent: true,
+    announcements: true,
+    folders: true,
+    important: false,
+    normal: false,
   },
 }) => {
   const [foldersExpanded, setFoldersExpanded] = useState(true);
+  const [pinnedExpanded, setPinnedExpanded] = useState(true);
+
+  // Auto-expand Root Folder category whenever active folder changes
+  React.useEffect(() => {
+    if (currentFolderId) {
+      setFoldersExpanded(true);
+    }
+  }, [currentFolderId]);
 
   // Top-level folders (parentId === null)
-  const rootFolders = folders.filter((f) => f.parentId === null);
+  const rootFolders = folders.filter((f) => {
+    const pId = f.parentId !== undefined ? f.parentId : (f as any).parent_id;
+    return pId === null || pId === undefined;
+  });
 
   const handleSelectSidebarFolder = (folderId: string | null) => {
     onSelectNav('documents');
@@ -75,6 +90,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
+  // Single Dashboard label & icon based on current role
+  const dashboardConfig =
+    currentUser.role === 'admin'
+      ? {
+          label: 'Admin Dashboard',
+          icon: <ShieldCheck className="w-4 h-4 text-purple-500" />,
+          targetKey: 'admin-panel' as ActiveNavKey,
+        }
+      : currentUser.role === 'uploader'
+      ? {
+          label: 'Lecturer Hub',
+          icon: <UploadCloud className="w-4 h-4 text-amber-500" />,
+          targetKey: 'lecturer-panel' as ActiveNavKey,
+        }
+      : {
+          label: 'Student Dashboard',
+          icon: <LayoutGrid className="w-4 h-4 text-blue-500" />,
+          targetKey: 'dashboard' as ActiveNavKey,
+        };
+
   return (
     <aside
       className={`relative flex flex-col h-full bg-white dark:bg-black border-r border-neutral-200/90 dark:border-neutral-900 transition-all duration-300 ease-in-out select-none shrink-0 overflow-hidden ${
@@ -82,14 +117,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }`}
       aria-label="Sidebar navigation"
     >
-      {/* Top Header: Logo + Collapse Button */}
-      <div className="flex items-center h-16 px-5 border-b border-neutral-100 dark:border-neutral-900/60 relative group shrink-0">
-        <div className="flex items-center justify-between w-[216px] shrink-0">
+      {/* Header: Logo + Collapse Button */}
+      <div
+        className={`flex items-center h-16 border-b border-neutral-100 dark:border-neutral-900/60 relative group shrink-0 ${
+          collapsed ? 'px-0 justify-center' : 'px-5'
+        }`}
+      >
+        <div
+          className={`flex items-center ${
+            collapsed ? 'justify-center w-auto' : 'justify-between w-[216px]'
+          } shrink-0`}
+        >
           <button
             type="button"
             onClick={onToggleCollapse}
             className="flex items-center gap-3 cursor-pointer focus:outline-none"
             aria-label={collapsed ? 'Open sidebar' : 'CEC Drive logo'}
+            title={collapsed ? 'Expand sidebar' : undefined}
           >
             <div className="w-6 h-6 flex items-center justify-center shrink-0 transition-transform group-hover:scale-110">
               <SynapseLogo showText={false} />
@@ -105,212 +149,168 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               onClick={onToggleCollapse}
-              className="p-1.5 text-neutral-400 hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0"
-              aria-label="Collapse sidebar"
-              title="Collapse sidebar"
+              className="p-1.5 text-neutral-400 hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 cursor-pointer"
+              aria-label="Close sidebar"
+              title="Close sidebar"
             >
-              <PanelLeftClose className="w-5 h-5" />
+              <X className="w-5 h-5 md:hidden" />
+              <PanelLeftClose className="w-5 h-5 hidden md:block" />
             </button>
           )}
         </div>
       </div>
 
-      {/* Navigation Content */}
+      {/* Nav list */}
       <nav
         className="flex-1 px-0 py-2 space-y-3 overflow-y-auto overflow-x-hidden focus:outline-none scrollbar-none"
         tabIndex={-1}
       >
-        {/* Section 0: Control Panels (Admin, Lecturer, Student) */}
+        {/* Role-Based Dashboard */}
         <div className="px-0">
           <div className="space-y-0.5">
             <NavItem
-              icon={<LayoutGrid className="w-4 h-4" />}
-              label="Student Dashboard"
-              count={counts.dashboard}
-              active={activeNav === 'dashboard'}
+              icon={dashboardConfig.icon}
+              label={dashboardConfig.label}
+              hasNotification={notifications.dashboard}
+              active={activeNav === dashboardConfig.targetKey}
               collapsed={collapsed}
-              onClick={() => onSelectNav('dashboard')}
-            />
-
-            <NavItem
-              icon={<UploadCloud className="w-4 h-4 text-blue-500" />}
-              label="Lecturer Hub (Uploader)"
-              active={activeNav === 'lecturer-panel'}
-              collapsed={collapsed}
-              onClick={() => onSelectNav('lecturer-panel')}
-            />
-
-            <NavItem
-              icon={<ShieldCheck className="w-4 h-4 text-purple-500" />}
-              label="Admin Control Panel"
-              active={activeNav === 'admin-panel'}
-              collapsed={collapsed}
-              onClick={() => onSelectNav('admin-panel')}
+              onClick={() => onSelectNav(dashboardConfig.targetKey)}
             />
           </div>
         </div>
 
-        {/* Section Divider */}
-        <div className="h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 mx-5" />
+        <div className={`h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 ${collapsed ? 'mx-2' : 'mx-5'}`} />
 
-        {/* Section 1: Academic Hub */}
+        {/* Core Navigation Items */}
         <div className="px-0">
           <div className="space-y-0.5">
             <NavItem
-              icon={<Calendar className="w-4 h-4" />}
+              icon={<Calendar className="w-4 h-4 text-indigo-500" />}
               label="Calendar"
-              count={counts.calendar}
+              hasNotification={notifications.calendar}
+              notificationColor="bg-rose-500"
               active={activeNav === 'calendar'}
               collapsed={collapsed}
               onClick={() => onSelectNav('calendar')}
             />
 
+            <div>
+              <CollapsibleHeader
+                icon={<Pin className="w-4 h-4 text-amber-500 fill-amber-500/20" />}
+                label="Pinned Folder"
+                count={pinnedFolderIds.length}
+                expanded={pinnedExpanded}
+                collapsed={collapsed}
+                onToggle={() => setPinnedExpanded(!pinnedExpanded)}
+                onClickLabel={() => onSelectNav('pinned-folders')}
+                active={activeNav === 'pinned-folders'}
+              />
+
+              {/* Sub-list of quick access pinned folders in sidebar */}
+              {!collapsed && pinnedExpanded && pinnedFolderIds.length > 0 && (
+                <div className="ml-7 my-1 space-y-0.5 border-l border-neutral-200 dark:border-neutral-800 pl-2">
+                  {pinnedFolderIds.slice(0, 10).map((id) => {
+                    const f = folders.find((item) => item.id === id);
+                    if (!f) return null;
+                    const isFolderActive = activeNav === 'documents' && currentFolderId === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => handleSelectSidebarFolder(f.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-2 py-1 text-xs rounded-md truncate transition-colors text-left ${
+                          isFolderActive
+                            ? 'font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40'
+                            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                        }`}
+                        title={f.name}
+                      >
+                        <div className="flex items-center gap-2 truncate min-w-0">
+                          <FolderIcon className="w-3 h-3 text-amber-500 shrink-0" />
+                          <span className="truncate">{f.name}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <NavItem
-              icon={<Inbox className="w-4 h-4" />}
-              label="Inbox"
-              count={counts.inbox}
-              active={activeNav === 'inbox'}
+              icon={<Clock className="w-4 h-4 text-emerald-500" />}
+              label="Recent Files"
+              hasNotification={notifications.recent}
+              notificationColor="bg-rose-500"
+              active={activeNav === 'recent-files'}
               collapsed={collapsed}
-              onClick={() => onSelectNav('inbox')}
+              onClick={() => onSelectNav('recent-files')}
             />
 
             <NavItem
-              icon={<CheckCircle2 className="w-4 h-4" />}
-              label="My Tasks"
-              count={counts.myTasks}
-              active={activeNav === 'my-tasks'}
+              icon={<Megaphone className="w-4 h-4 text-rose-500" />}
+              label="Announcements"
+              hasNotification={notifications.announcements}
+              notificationColor="bg-rose-500"
+              active={activeNav === 'announcements'}
               collapsed={collapsed}
-              onClick={() => onSelectNav('my-tasks')}
+              onClick={() => onSelectNav('announcements')}
             />
           </div>
         </div>
 
-        {/* Section 2 Divider */}
-        <div className="h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 mx-5" />
+        <div className={`h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 ${collapsed ? 'mx-2' : 'mx-5'}`} />
 
-        {/* Section 2: Folders Tree */}
+        {/* Root Folder Dropdown Tree */}
         <div className="px-0">
-          <div className="space-y-0.5">
-            <CollapsibleHeader
-              icon={
-                foldersExpanded ? (
-                  <FolderOpen className="w-4 h-4 text-blue-500" />
-                ) : (
-                  <FolderIcon className="w-4 h-4 text-blue-500" />
-                )
-              }
-              label="Folders (Root)"
-              count={folders.length}
-              expanded={foldersExpanded}
-              collapsed={collapsed}
-              onToggle={() => setFoldersExpanded(!foldersExpanded)}
-              onClickLabel={() => {
-                setFoldersExpanded(true);
-                handleSelectSidebarFolder(null);
-              }}
-              active={activeNav === 'documents' && currentFolderId === null}
-            />
+          <CollapsibleHeader
+            icon={
+              foldersExpanded ? (
+                <FolderOpen className="w-4 h-4 text-blue-500 fill-blue-500/20" />
+              ) : (
+                <FolderIcon className="w-4 h-4 text-blue-500 fill-blue-500/20" />
+              )
+            }
+            label="Root Folders"
+            hasNotification={notifications.folders}
+            expanded={foldersExpanded}
+            collapsed={collapsed}
+            onToggle={() => setFoldersExpanded(!foldersExpanded)}
+            onClickLabel={() => handleSelectSidebarFolder(null)}
+            active={activeNav === 'documents'}
+          />
 
-            {/* Recursive Interactive Folder Directory Tree */}
-            {foldersExpanded && !collapsed && (
-              <div className="my-1 space-y-0.5 pr-2">
-                {rootFolders.map((folder) => (
-                  <SidebarFolderTreeNode
-                    key={folder.id}
-                    folder={folder}
-                    allFolders={folders}
-                    currentFolderId={currentFolderId}
-                    onSelectFolder={(id) => handleSelectSidebarFolder(id)}
-                    level={0}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Section 3 Divider */}
-        <div className="h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 mx-5" />
-
-        {/* Section 3: Tags */}
-        <div className="px-0">
-          <div className="space-y-0.5">
-            <NavItem
-              icon={<span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />}
-              label="Important"
-              count={counts.important}
-              active={activeNav === 'tag-important'}
-              collapsed={collapsed}
-              onClick={() => onSelectNav('tag-important')}
-            />
-
-            <NavItem
-              icon={<span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />}
-              label="Normal"
-              count={counts.normal}
-              active={activeNav === 'tag-normal'}
-              collapsed={collapsed}
-              onClick={() => onSelectNav('tag-normal')}
-            />
-          </div>
+          {!collapsed && foldersExpanded && (
+            <div className="mt-1 space-y-0.5">
+              {rootFolders.map((folder) => (
+                <SidebarFolderTreeNode
+                  key={folder.id}
+                  folder={folder}
+                  allFolders={folders}
+                  currentFolderId={currentFolderId}
+                  onSelectFolder={handleSelectSidebarFolder}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </nav>
 
-      {/* Bottom Footer: Role Switcher, Dark Mode Toggle & Account Profile */}
+      {/* Footer: Theme Toggle & User Account */}
       <div className="py-2 border-t border-neutral-100 dark:border-neutral-900/80 bg-neutral-50/50 dark:bg-black space-y-1 shrink-0">
-        {/* Quick Control Panel Role Switcher */}
-        {!collapsed && (
-          <div className="px-4 py-1.5">
-            <label className="block text-[10px] font-extrabold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1">
-              Active Control Panel Role
-            </label>
-            <div className="grid grid-cols-3 gap-1 bg-neutral-100 dark:bg-neutral-900 p-1 rounded-xl">
-              <button
-                type="button"
-                onClick={() => onSwitchRole('student')}
-                className={`py-1 text-[11px] font-bold rounded-lg transition-all ${
-                  currentUser.role === 'student'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                Student
-              </button>
-              <button
-                type="button"
-                onClick={() => onSwitchRole('uploader')}
-                className={`py-1 text-[11px] font-bold rounded-lg transition-all ${
-                  currentUser.role === 'uploader'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                Lecturer
-              </button>
-              <button
-                type="button"
-                onClick={() => onSwitchRole('admin')}
-                className={`py-1 text-[11px] font-bold rounded-lg transition-all ${
-                  currentUser.role === 'admin'
-                    ? 'bg-purple-600 text-white shadow-xs'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                Admin
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Dark/Light Mode Toggle */}
-        <div className="relative group">
+        <div className="relative group px-2">
           <button
             type="button"
             onClick={onToggleTheme}
-            className="w-full flex items-center px-5 py-2 rounded-xl text-sm font-medium transition-all hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 text-neutral-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400"
+            title={collapsed ? (theme === 'dark' ? 'Full Black (OLED)' : 'Light Theme') : undefined}
+            className={`w-full flex items-center py-2 rounded-xl text-sm font-medium transition-all hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 text-neutral-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer ${
+              collapsed ? 'justify-center px-0' : 'px-3'
+            }`}
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'full black'} mode`}
           >
-            <div className="flex items-center justify-between w-[216px] shrink-0">
+            <div
+              className={`flex items-center ${
+                collapsed ? 'justify-center w-auto' : 'justify-between w-full'
+              } shrink-0`}
+            >
               <div className="flex items-center gap-3 min-w-0">
                 <span className="w-6 h-6 flex items-center justify-center shrink-0 transition-all group-hover:scale-110 group-hover:text-amber-500 dark:group-hover:text-amber-400">
                   {theme === 'dark' ? (
@@ -329,10 +329,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* User Account Profile */}
-        <div className="relative group">
-          <div className="w-full flex items-center px-5 py-2 rounded-xl text-sm font-medium transition-all hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 text-neutral-600 dark:text-neutral-400">
-            <div className="flex items-center justify-between w-[216px] shrink-0">
+        {/* Account Profile Card */}
+        <div className="relative group px-2">
+          <div
+            title={collapsed ? currentUser.name : undefined}
+            className={`w-full flex items-center py-2 rounded-xl text-sm font-medium transition-all text-neutral-600 dark:text-neutral-400 ${
+              collapsed ? 'justify-center px-0' : 'px-3'
+            }`}
+          >
+            <div
+              className={`flex items-center ${
+                collapsed ? 'justify-center w-auto' : 'justify-between w-full'
+              } shrink-0`}
+            >
               <div className="flex items-center gap-3 min-w-0">
                 <span
                   className={`w-7 h-7 rounded-full ${currentUser.bgColor} text-white flex items-center justify-center font-bold text-xs shrink-0`}
@@ -362,6 +371,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 };
 
+// Helper function to check if a node is an ancestor of the currently active folder
+const isAncestorOfFolder = (nodeId: string, targetId: string | null, allFolders: FolderItem[]): boolean => {
+  if (!targetId) return false;
+  let curr = allFolders.find((f) => f.id === targetId);
+  while (curr) {
+    const parentId = curr.parentId !== undefined ? curr.parentId : (curr as any).parent_id;
+    if (parentId === nodeId) return true;
+    curr = allFolders.find((f) => f.id === parentId);
+  }
+  return false;
+};
+
 /* Subcomponent: Recursive Folder Tree Node */
 interface SidebarFolderTreeNodeProps {
   folder: FolderItem;
@@ -378,9 +399,24 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
   onSelectFolder,
   level = 0,
 }) => {
-  const subfolders = allFolders.filter((f) => f.parentId === folder.id);
-  const [expanded, setExpanded] = useState(level === 0);
+  const subfolders = allFolders.filter((f) => {
+    const pId = f.parentId !== undefined ? f.parentId : (f as any).parent_id;
+    return pId === folder.id;
+  });
+
   const isSelected = currentFolderId === folder.id;
+  const isChildSelected = React.useMemo(() => {
+    return isAncestorOfFolder(folder.id, currentFolderId, allFolders);
+  }, [folder.id, currentFolderId, allFolders]);
+
+  const [expanded, setExpanded] = useState(level === 0 || isSelected || isChildSelected);
+
+  // Automatically drop down / expand when this folder or any of its subfolders is active
+  React.useEffect(() => {
+    if (isSelected || isChildSelected) {
+      setExpanded(true);
+    }
+  }, [isSelected, isChildSelected]);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -394,9 +430,9 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
         type="button"
         onClick={handleClick}
         style={{ paddingLeft: `${level * 10 + 16}px` }}
-        className={`w-full flex items-center justify-between py-1.5 pr-2.5 text-xs font-medium rounded-xl transition-all ${
+        className={`w-full flex items-center justify-between py-1.5 pr-2.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
           isSelected
-            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold border border-blue-200 dark:border-blue-800 shadow-xs'
+            ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 hover:text-neutral-900 dark:hover:text-white'
         }`}
       >
@@ -417,11 +453,6 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
           />
           <span className="truncate whitespace-nowrap">{folder.name}</span>
         </div>
-        {folder.fileCount > 0 && (
-          <span className="text-[10px] font-mono text-neutral-400 dark:text-neutral-500 tabular-nums shrink-0 ml-1">
-            {folder.fileCount}
-          </span>
-        )}
       </button>
 
       {expanded && subfolders.length > 0 && (
@@ -442,11 +473,12 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
   );
 };
 
-/* Subcomponent: Standard Nav Item */
+/* Subcomponent: Standard Nav Item with Notification Dot */
 interface NavItemProps {
   icon: React.ReactNode;
   label: string;
-  count?: number;
+  hasNotification?: boolean;
+  notificationColor?: string;
   active?: boolean;
   collapsed?: boolean;
   onClick: () => void;
@@ -455,26 +487,34 @@ interface NavItemProps {
 const NavItem: React.FC<NavItemProps> = ({
   icon,
   label,
-  count,
+  hasNotification,
+  notificationColor = 'bg-blue-500',
   active,
   collapsed,
   onClick,
 }) => {
   return (
-    <div className="relative group">
+    <div className="relative group px-2">
       <button
         type="button"
         onClick={onClick}
-        className={`w-full flex items-center px-5 py-2 rounded-xl text-sm font-medium transition-all ${
+        title={collapsed ? label : undefined}
+        className={`w-full flex items-center py-2 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+          collapsed ? 'justify-center px-0' : 'px-3'
+        } ${
           active
             ? 'bg-neutral-100 dark:bg-neutral-900 text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 hover:text-blue-600 dark:hover:text-blue-400'
         }`}
       >
-        <div className="flex items-center justify-between w-[216px] shrink-0">
+        <div
+          className={`flex items-center ${
+            collapsed ? 'justify-center w-auto' : 'justify-between w-full'
+          } shrink-0`}
+        >
           <div className="flex items-center gap-3 min-w-0">
             <span
-              className={`w-6 h-6 flex items-center justify-center shrink-0 transition-all group-hover:scale-110 ${
+              className={`w-6 h-6 flex items-center justify-center shrink-0 transition-colors relative ${
                 active
                   ? 'text-blue-600 dark:text-blue-400'
                   : 'text-neutral-400 dark:text-neutral-500 group-hover:text-blue-600 dark:group-hover:text-blue-400'
@@ -489,9 +529,10 @@ const NavItem: React.FC<NavItemProps> = ({
             )}
           </div>
 
-          {!collapsed && typeof count === 'number' && (
-            <span className="text-xs text-neutral-400 dark:text-neutral-500 font-mono tabular-nums shrink-0 ml-2 group-hover:text-blue-500 transition-colors">
-              {count}
+          {!collapsed && hasNotification && (
+            <span className="relative flex h-2 w-2 shrink-0 ml-2">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${notificationColor} opacity-75`} />
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${notificationColor}`} />
             </span>
           )}
         </div>
@@ -500,10 +541,11 @@ const NavItem: React.FC<NavItemProps> = ({
   );
 };
 
-/* Subcomponent: Collapsible Category Header with Chevron */
+/* Subcomponent: Collapsible Category Header */
 interface CollapsibleHeaderProps {
   icon: React.ReactNode;
   label: string;
+  hasNotification?: boolean;
   count?: number;
   expanded: boolean;
   collapsed?: boolean;
@@ -515,6 +557,7 @@ interface CollapsibleHeaderProps {
 const CollapsibleHeader: React.FC<CollapsibleHeaderProps> = ({
   icon,
   label,
+  hasNotification,
   count,
   expanded,
   collapsed,
@@ -522,23 +565,33 @@ const CollapsibleHeader: React.FC<CollapsibleHeaderProps> = ({
   onClickLabel,
   active,
 }) => {
+  const handleClick = () => {
+    onClickLabel();
+    onToggle();
+  };
+
   return (
-    <div className="relative group">
-      <div
-        className={`w-full flex items-center px-5 py-2 rounded-xl text-sm font-medium transition-colors ${
+    <div className="relative group px-2">
+      <button
+        type="button"
+        onClick={handleClick}
+        title={collapsed ? label : undefined}
+        className={`w-full flex items-center py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer text-left focus-visible:outline-none ${
+          collapsed ? 'justify-center px-0' : 'px-3'
+        } ${
           active
             ? 'bg-neutral-100/60 dark:bg-neutral-900/60 text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 hover:text-blue-600 dark:hover:text-blue-400'
         }`}
       >
-        <div className="flex items-center justify-between w-[216px] shrink-0">
-          <button
-            type="button"
-            onClick={onClickLabel}
-            className="flex items-center gap-3 truncate text-left focus-visible:outline-none min-w-0"
-          >
+        <div
+          className={`flex items-center ${
+            collapsed ? 'justify-center w-auto' : 'justify-between w-full'
+          } shrink-0`}
+        >
+          <div className="flex items-center gap-3 truncate min-w-0">
             <span
-              className={`w-6 h-6 flex items-center justify-center shrink-0 transition-all group-hover:scale-110 ${
+              className={`w-6 h-6 flex items-center justify-center shrink-0 transition-colors ${
                 active
                   ? 'text-blue-600 dark:text-blue-400'
                   : 'text-neutral-400 dark:text-neutral-500 group-hover:text-blue-600 dark:group-hover:text-blue-400'
@@ -551,33 +604,29 @@ const CollapsibleHeader: React.FC<CollapsibleHeaderProps> = ({
                 {label}
               </span>
             )}
-          </button>
+          </div>
 
           {!collapsed && (
             <div className="flex items-center gap-2 shrink-0 ml-2">
-              {typeof count === 'number' && (
-                <span className="text-xs text-neutral-400 dark:text-neutral-500 font-mono tabular-nums group-hover:text-blue-500 transition-colors">
+              {count !== undefined && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-mono">
                   {count}
                 </span>
               )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggle();
-                }}
-                className="p-0.5 text-neutral-400 hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200 rounded hover:bg-neutral-200/50 dark:hover:bg-neutral-800 transition-colors"
-              >
-                {expanded ? (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5" />
-                )}
-              </button>
+              {hasNotification && count === undefined && (
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+                </span>
+              )}
+              {expanded ? (
+                <ChevronDown className="w-3.5 h-3.5 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300 transition-transform" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300 transition-transform" />
+              )}
             </div>
           )}
         </div>
-      </div>
+      </button>
     </div>
   );
 };
