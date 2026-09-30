@@ -277,9 +277,12 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setIsAuthenticated(true);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('cec_drive_authenticated', 'true');
+        }
         const meta = session.user.user_metadata || {};
         if (meta?.role) {
           setCurrentRole(meta.role);
@@ -298,8 +301,11 @@ export default function App() {
         } catch (e) {
           console.warn('Session profile sync error:', e);
         }
-      } else {
+      } else if (event === 'SIGNED_OUT') {
         setIsAuthenticated(false);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('cec_drive_authenticated', 'false');
+        }
       }
     });
 
