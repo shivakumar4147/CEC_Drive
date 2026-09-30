@@ -100,10 +100,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           },
         });
 
-        // Helper function to write to Supabase public.profiles table
+        // Helper function to write to Supabase public.profiles table with fallback resilience
         const saveProfileToSupabase = async (userId: string, userEmail: string) => {
           try {
-            const profilePayload = {
+            const fullPayload = {
               id: userId,
               email: userEmail,
               name: selectedRole === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
@@ -118,11 +118,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               bg_color: selectedRole === 'student' ? 'bg-blue-600' : 'bg-amber-600',
               updated_at: new Date().toISOString(),
             };
-            const { error: upsertErr } = await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' });
-            if (upsertErr) {
-              console.warn('Supabase profiles upsert error:', upsertErr.message);
+
+            // 1. Try full upsert
+            const { error: fullErr } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
+            if (fullErr) {
+              console.warn('Full profile upsert error, trying minimal core schema:', fullErr.message);
+              // 2. Fallback to minimal core fields (id, name, email, role, usn) if extra columns do not exist in DB yet
+              const minimalPayload = {
+                id: userId,
+                email: userEmail,
+                name: selectedRole === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
+                role: selectedRole === 'student' ? 'student' : 'uploader',
+                usn: selectedRole === 'student' ? studentUSN || null : null,
+              };
+              const { error: minErr } = await supabase.from('profiles').upsert(minimalPayload, { onConflict: 'id' });
+              if (minErr) {
+                console.error('Minimal profiles upsert error:', minErr.message);
+              } else {
+                console.log('Successfully saved minimal profile to Supabase!');
+              }
             } else {
-              console.log('Successfully saved profile to Supabase profiles table!');
+              console.log('Successfully saved full profile to Supabase profiles table!');
             }
           } catch (e) {
             console.error('Failed to sync profile to Supabase:', e);

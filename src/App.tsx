@@ -277,12 +277,26 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         setIsAuthenticated(true);
-        const meta = session.user.user_metadata;
+        const meta = session.user.user_metadata || {};
         if (meta?.role) {
           setCurrentRole(meta.role);
+        }
+
+        // Auto-sync active session to public.profiles table
+        try {
+          const minimalProfile = {
+            id: session.user.id,
+            email: session.user.email,
+            name: meta.name || 'User',
+            role: meta.role || 'student',
+            usn: meta.usn || null,
+          };
+          await supabase.from('profiles').upsert(minimalProfile, { onConflict: 'id' });
+        } catch (e) {
+          console.warn('Session profile sync error:', e);
         }
       } else {
         setIsAuthenticated(false);
