@@ -1,3 +1,16 @@
+export type UserRole = 'admin' | 'uploader' | 'student';
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  department?: string;
+  section?: string;
+  initial: string;
+  bgColor: string;
+}
+
 export interface DocumentItem {
   id: string;
   name: string;
@@ -36,7 +49,7 @@ export type ActiveNavKey =
   | 'my-tasks'
   | 'folders'
   | 'documents'
-  | 'sprint-28'
-  | 'design-system'
+  | 'admin-panel'
+  | 'lecturer-panel'
   | 'tag-important'
   | 'tag-normal';

@@ -5,11 +5,16 @@ import {
   Plus,
   Menu,
   Sparkles,
+  ShieldCheck,
+  UploadCloud,
+  UserCheck,
 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { Inbox } from './components/Inbox';
 import { MyTasks } from './components/MyTasks';
+import { AdminPanel } from './components/AdminPanel';
+import { LecturerPanel } from './components/LecturerPanel';
 import { FolderCard } from './components/FolderCard';
 import { FolderToolbar } from './components/FolderToolbar';
 import { DocumentTable, SortField, SortOrder } from './components/DocumentTable';
@@ -17,12 +22,15 @@ import { DocumentGrid } from './components/DocumentGrid';
 import { BatchActionBar } from './components/BatchActionBar';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { NewDocumentModal } from './components/NewDocumentModal';
+import { supabase } from './lib/supabase';
 import {
   DocumentItem,
   FolderItem,
   ViewMode,
   ThemeMode,
   ActiveNavKey,
+  UserRole,
+  UserProfile,
 } from './types';
 
 // Complete University File Explorer Hierarchy:
@@ -158,6 +166,39 @@ const INITIAL_DOCUMENTS: DocumentItem[] = [
   },
 ];
 
+// Initial System Users for the 3 Control Panel Roles
+const INITIAL_USERS: UserProfile[] = [
+  {
+    id: 'usr-1',
+    name: 'Shiva Student',
+    email: 'shiva@student.cec.edu.in',
+    role: 'student',
+    department: 'CSE',
+    section: 'Section A',
+    initial: 'S',
+    bgColor: 'bg-blue-600',
+  },
+  {
+    id: 'usr-2',
+    name: 'Prof. Sharma',
+    email: 'sharma@lecturer.cec.edu.in',
+    role: 'uploader',
+    department: 'CSE',
+    section: 'Section A',
+    initial: 'S',
+    bgColor: 'bg-amber-600',
+  },
+  {
+    id: 'usr-3',
+    name: 'CEC Admin',
+    email: 'admin@cec.edu.in',
+    role: 'admin',
+    department: 'System Wide',
+    initial: 'A',
+    bgColor: 'bg-purple-600',
+  },
+];
+
 export default function App() {
   // Theme state
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -189,6 +230,15 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Users & Role State
+  const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
+  const [currentRole, setCurrentRole] = useState<UserRole>('student');
+
+  const currentUser = useMemo(() => {
+    const found = users.find((u) => u.role === currentRole);
+    return found || users[0];
+  }, [users, currentRole]);
+
   // Active navigation & Explorer location state
   const [activeNav, setActiveNav] = useState<ActiveNavKey>('dashboard');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -202,21 +252,74 @@ export default function App() {
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
 
-  // Sorting
+  // Sorting & Search
   const [sortField, setSortField] = useState<SortField>('dateAdded');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-
-  // Search
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Modals
+  // Modals & Notifications
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [isNewDocModalOpen, setIsNewDocModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Supabase Data Fetching
+  useEffect(() => {
+    async function fetchSupabaseData() {
+      try {
+        const { data: remoteDocs, error: docErr } = await supabase.from('documents').select('*');
+        if (!docErr && remoteDocs && remoteDocs.length > 0) {
+          setDocuments(remoteDocs);
+        }
+
+        const { data: remoteFolders, error: folderErr } = await supabase.from('folders').select('*');
+        if (!folderErr && remoteFolders && remoteFolders.length > 0) {
+          setFolders(remoteFolders);
+        }
+      } catch (err) {
+        console.log('Supabase sync notice: using initial dataset');
+      }
+    }
+    fetchSupabaseData();
+  }, []);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // Switch role handler
+  const handleSwitchRole = (newRole: UserRole) => {
+    setCurrentRole(newRole);
+    if (newRole === 'admin') {
+      setActiveNav('admin-panel');
+    } else if (newRole === 'uploader') {
+      setActiveNav('lecturer-panel');
+    } else {
+      setActiveNav('dashboard');
+    }
+    showToast(`Switched control panel view to ${newRole.toUpperCase()} mode`);
+  };
+
+  // User Management Handlers for Admin
+  const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
+    setUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+    );
+    showToast('User role updated');
+  };
+
+  const handleAddUser = (newUser: Omit<UserProfile, 'id'>) => {
+    const userItem: UserProfile = {
+      ...newUser,
+      id: `usr-${Date.now()}`,
+    };
+    setUsers((prev) => [...prev, userItem]);
+    showToast(`Added new user "${newUser.name}"`);
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    showToast('User removed');
   };
 
   // Helper to recursively get all subfolder IDs under a folder
@@ -279,17 +382,14 @@ export default function App() {
   const filteredAndSortedDocuments = useMemo(() => {
     let result = [...documents];
 
-    // Navigation section filter
     if (activeNav === 'tag-important') {
       result = result.filter((d) => d.tag === 'important');
     } else if (activeNav === 'tag-normal') {
       result = result.filter((d) => d.tag === 'normal');
     } else if (activeNav === 'documents') {
-      // In Documents explorer mode, filter by current folder directory context
       result = result.filter((d) => (d.folderId || null) === currentFolderId);
     }
 
-    // Search query filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -300,7 +400,6 @@ export default function App() {
       );
     }
 
-    // Sorting
     return result.sort((a, b) => {
       let comparison = 0;
       if (sortField === 'name') {
@@ -315,7 +414,7 @@ export default function App() {
   }, [documents, activeNav, currentFolderId, searchQuery, sortField, sortOrder]);
 
   // Folder Explorer Logic Actions
-  const handleCreateFolder = (name: string, parentId: string | null) => {
+  const handleCreateFolder = async (name: string, parentId: string | null) => {
     const newFolder: FolderItem = {
       id: `folder-${Date.now()}`,
       name,
@@ -325,6 +424,13 @@ export default function App() {
     };
     setFolders((prev) => [...prev, newFolder]);
     showToast(`Created folder "${name}"`);
+
+    // Sync to Supabase
+    try {
+      await supabase.from('folders').insert([newFolder]);
+    } catch (e) {
+      // ignore offline fallback
+    }
   };
 
   const handleRenameFolder = (folderId: string, newName: string) => {
@@ -413,13 +519,20 @@ export default function App() {
     showToast(`Downloading ${selectedDocIds.length} files as ZIP archive...`);
   };
 
-  const handleMarkImportant = () => {
-    setDocuments((prev) =>
-      prev.map((d) =>
-        selectedDocIds.includes(d.id) ? { ...d, tag: 'important' } : d
-      )
-    );
-    showToast(`Marked ${selectedDocIds.length} documents as Important`);
+  const handleMarkImportant = (id?: string) => {
+    if (id) {
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, tag: d.tag === 'important' ? 'normal' : 'important' } : d))
+      );
+      showToast('Toggled file tag priority');
+    } else {
+      setDocuments((prev) =>
+        prev.map((d) =>
+          selectedDocIds.includes(d.id) ? { ...d, tag: 'important' } : d
+        )
+      );
+      showToast(`Marked ${selectedDocIds.length} documents as Important`);
+    }
   };
 
   const handleDeleteSelected = () => {
@@ -429,9 +542,16 @@ export default function App() {
     showToast(`Deleted ${count} documents`);
   };
 
-  const handleAddDocument = (newDoc: DocumentItem) => {
+  const handleAddDocument = async (newDoc: DocumentItem) => {
     setDocuments((prev) => [newDoc, ...prev]);
-    showToast(`Document "${newDoc.name}" created`);
+    showToast(`Document "${newDoc.name}" published`);
+
+    // Sync to Supabase
+    try {
+      await supabase.from('documents').insert([newDoc]);
+    } catch (e) {
+      // offline fallback
+    }
   };
 
   const handleToggleStar = (id: string) => {
@@ -459,6 +579,8 @@ export default function App() {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           theme={theme}
           onToggleTheme={toggleTheme}
+          currentUser={currentUser}
+          onSwitchRole={handleSwitchRole}
           folders={computedFolders}
           currentFolderId={currentFolderId}
           onNavigateFolder={setCurrentFolderId}
@@ -496,6 +618,8 @@ export default function App() {
               onToggleCollapse={() => setMobileMenuOpen(false)}
               theme={theme}
               onToggleTheme={toggleTheme}
+              currentUser={currentUser}
+              onSwitchRole={handleSwitchRole}
               folders={computedFolders}
               currentFolderId={currentFolderId}
               onNavigateFolder={(id) => {
@@ -535,7 +659,11 @@ export default function App() {
                 •
               </span>
               <span className="font-semibold text-neutral-800 dark:text-neutral-200 truncate max-w-[140px] sm:max-w-none">
-                {activeNav === 'dashboard'
+                {activeNav === 'admin-panel'
+                  ? 'Admin Control Center'
+                  : activeNav === 'lecturer-panel'
+                  ? 'Lecturer Upload Hub'
+                  : activeNav === 'dashboard'
                   ? 'Student Dashboard'
                   : activeNav === 'inbox'
                   ? 'Inbox'
@@ -550,8 +678,28 @@ export default function App() {
 
           {/* Quick Actions in Header */}
           <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* Control Panel Role Badge */}
+            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-bold">
+              {currentUser.role === 'admin' ? (
+                <>
+                  <ShieldCheck className="w-3.5 h-3.5 text-purple-500" />
+                  <span className="text-purple-600 dark:text-purple-400">Admin Mode</span>
+                </>
+              ) : currentUser.role === 'uploader' ? (
+                <>
+                  <UploadCloud className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="text-amber-600 dark:text-amber-400">Lecturer / Uploader Mode</span>
+                </>
+              ) : (
+                <>
+                  <UserCheck className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="text-blue-600 dark:text-blue-400">Student Mode</span>
+                </>
+              )}
+            </div>
+
             {/* Search Input */}
-            <div className="relative hidden sm:block w-44 md:w-60 lg:w-72">
+            <div className="relative hidden sm:block w-44 md:w-56 lg:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
               <input
                 id="document-search-input"
@@ -575,7 +723,26 @@ export default function App() {
 
         {/* Scrollable Main Content Container */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 md:px-8 py-5 sm:py-7 space-y-6 sm:space-y-8">
-          {activeNav === 'dashboard' ? (
+          {activeNav === 'admin-panel' ? (
+            <AdminPanel
+              users={users}
+              folders={folders}
+              documents={documents}
+              onUpdateUserRole={handleUpdateUserRole}
+              onAddUser={handleAddUser}
+              onDeleteUser={handleDeleteUser}
+              onCreateFolder={handleCreateFolder}
+            />
+          ) : activeNav === 'lecturer-panel' ? (
+            <LecturerPanel
+              documents={documents}
+              folders={computedFolders}
+              currentLecturerName={currentUser.name}
+              onAddDocument={handleAddDocument}
+              onDeleteDocument={handleDeleteDoc}
+              onToggleImportant={handleMarkImportant}
+            />
+          ) : activeNav === 'dashboard' ? (
             <Dashboard
               onSelectNav={(key) => {
                 setActiveNav(key);

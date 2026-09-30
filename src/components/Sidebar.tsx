@@ -11,10 +11,12 @@ import {
   PanelLeftClose,
   Sun,
   Moon,
-  UserCircle,
+  ShieldCheck,
+  UploadCloud,
+  UserCheck,
 } from 'lucide-react';
 import { SynapseLogo } from './SynapseLogo';
-import { ActiveNavKey, ThemeMode, FolderItem } from '../types';
+import { ActiveNavKey, ThemeMode, FolderItem, UserRole, UserProfile } from '../types';
 
 interface SidebarProps {
   activeNav: ActiveNavKey;
@@ -23,6 +25,8 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   theme: ThemeMode;
   onToggleTheme: () => void;
+  currentUser: UserProfile;
+  onSwitchRole: (newRole: UserRole) => void;
   folders?: FolderItem[];
   currentFolderId?: string | null;
   onNavigateFolder?: (folderId: string | null) => void;
@@ -44,6 +48,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   theme,
   onToggleTheme,
+  currentUser,
+  onSwitchRole,
   folders = [],
   currentFolderId = null,
   onNavigateFolder,
@@ -114,18 +120,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
         className="flex-1 px-0 py-2 space-y-3 overflow-y-auto overflow-x-hidden focus:outline-none scrollbar-none"
         tabIndex={-1}
       >
-        {/* Section 1: Main Academic & Student Hub */}
+        {/* Section 0: Control Panels (Admin, Lecturer, Student) */}
         <div className="px-0">
           <div className="space-y-0.5">
             <NavItem
               icon={<LayoutGrid className="w-4 h-4" />}
-              label="Dashboard"
+              label="Student Dashboard"
               count={counts.dashboard}
               active={activeNav === 'dashboard'}
               collapsed={collapsed}
               onClick={() => onSelectNav('dashboard')}
             />
 
+            <NavItem
+              icon={<UploadCloud className="w-4 h-4 text-blue-500" />}
+              label="Lecturer Hub (Uploader)"
+              active={activeNav === 'lecturer-panel'}
+              collapsed={collapsed}
+              onClick={() => onSelectNav('lecturer-panel')}
+            />
+
+            <NavItem
+              icon={<ShieldCheck className="w-4 h-4 text-purple-500" />}
+              label="Admin Control Panel"
+              active={activeNav === 'admin-panel'}
+              collapsed={collapsed}
+              onClick={() => onSelectNav('admin-panel')}
+            />
+          </div>
+        </div>
+
+        {/* Section Divider */}
+        <div className="h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 mx-5" />
+
+        {/* Section 1: Academic Hub */}
+        <div className="px-0">
+          <div className="space-y-0.5">
             <NavItem
               icon={<Calendar className="w-4 h-4" />}
               label="Calendar"
@@ -226,8 +256,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </nav>
 
-      {/* Bottom Footer: Dark Mode Toggle & User Account Profile */}
-      <div className="py-2 border-t border-neutral-100 dark:border-neutral-900/80 bg-neutral-50/50 dark:bg-black space-y-0.5 shrink-0">
+      {/* Bottom Footer: Role Switcher, Dark Mode Toggle & Account Profile */}
+      <div className="py-2 border-t border-neutral-100 dark:border-neutral-900/80 bg-neutral-50/50 dark:bg-black space-y-1 shrink-0">
+        {/* Quick Control Panel Role Switcher */}
+        {!collapsed && (
+          <div className="px-4 py-1.5">
+            <label className="block text-[10px] font-extrabold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1">
+              Active Control Panel Role
+            </label>
+            <div className="grid grid-cols-3 gap-1 bg-neutral-100 dark:bg-neutral-900 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => onSwitchRole('student')}
+                className={`py-1 text-[11px] font-bold rounded-lg transition-all ${
+                  currentUser.role === 'student'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                }`}
+              >
+                Student
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchRole('uploader')}
+                className={`py-1 text-[11px] font-bold rounded-lg transition-all ${
+                  currentUser.role === 'uploader'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                }`}
+              >
+                Lecturer
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchRole('admin')}
+                className={`py-1 text-[11px] font-bold rounded-lg transition-all ${
+                  currentUser.role === 'admin'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                }`}
+              >
+                Admin
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Dark/Light Mode Toggle */}
         <div className="relative group">
           <button
@@ -255,31 +329,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* User Identity / Account Profile */}
+        {/* User Account Profile */}
         <div className="relative group">
-          <button
-            type="button"
-            className="w-full flex items-center px-5 py-2 rounded-xl text-sm font-medium transition-all hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 text-neutral-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400"
-            aria-label="Account Profile"
-          >
+          <div className="w-full flex items-center px-5 py-2 rounded-xl text-sm font-medium transition-all hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 text-neutral-600 dark:text-neutral-400">
             <div className="flex items-center justify-between w-[216px] shrink-0">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="w-6 h-6 flex items-center justify-center shrink-0 transition-all group-hover:scale-110">
-                  <UserCircle className="w-5 h-5 text-purple-600 dark:text-purple-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" />
+                <span
+                  className={`w-7 h-7 rounded-full ${currentUser.bgColor} text-white flex items-center justify-center font-bold text-xs shrink-0`}
+                >
+                  {currentUser.initial}
                 </span>
                 {!collapsed && (
                   <div className="min-w-0 flex-1 truncate text-left">
-                    <p className="text-xs font-semibold text-neutral-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate whitespace-nowrap">
-                      Shiva Student
+                    <p className="text-xs font-semibold text-neutral-900 dark:text-white truncate whitespace-nowrap">
+                      {currentUser.name}
                     </p>
-                    <p className="text-[11px] text-neutral-400 dark:text-neutral-500 truncate whitespace-nowrap">
-                      CSE • 5th Sem
+                    <p className="text-[11px] text-neutral-400 dark:text-neutral-500 truncate whitespace-nowrap capitalize">
+                      {currentUser.role === 'uploader'
+                        ? 'Lecturer • Uploader'
+                        : currentUser.role === 'admin'
+                        ? 'System Administrator'
+                        : `${currentUser.department || 'CSE'} • ${currentUser.section || 'Sec A'}`}
                     </p>
                   </div>
                 )}
               </div>
             </div>
-          </button>
+          </div>
         </div>
       </div>
     </aside>
@@ -303,7 +379,7 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
   level = 0,
 }) => {
   const subfolders = allFolders.filter((f) => f.parentId === folder.id);
-  const [expanded, setExpanded] = useState(level === 0); // Expand top level by default
+  const [expanded, setExpanded] = useState(level === 0);
   const isSelected = currentFolderId === folder.id;
 
   const handleClick = (e: React.MouseEvent) => {
