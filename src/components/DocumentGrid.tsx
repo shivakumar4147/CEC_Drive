@@ -21,8 +21,8 @@ interface DocumentGridProps {
 }
 
 export const DocumentGrid: React.FC<DocumentGridProps> = ({
-  documents,
-  selectedIds,
+  documents = [],
+  selectedIds = [],
   onToggleSelect,
   onDocumentClick,
   onDownload,
@@ -41,10 +41,16 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
     }
   };
 
+  const safeDocs = Array.isArray(documents) ? documents : [];
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-1">
-      {documents.map((doc) => {
+      {safeDocs.map((doc) => {
+        if (!doc) return null;
         const isSelected = selectedIds.includes(doc.id);
+        const authorName = doc.author?.name || 'Lecturer';
+        const authorInitial = doc.author?.initial || authorName.charAt(0) || 'L';
+        const authorBgColor = doc.author?.bgColor || 'bg-blue-600';
 
         return (
           <div
@@ -79,11 +85,11 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                 }`}
                 aria-label={`Select ${doc.name}`}
               >
-                {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
               </button>
 
               <span className="text-[11px] font-mono uppercase text-neutral-400 dark:text-neutral-500">
-                {doc.type}
+                {doc.type || 'file'}
               </span>
             </div>
 
@@ -91,28 +97,28 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
             <div className="my-6 flex flex-col items-center justify-center py-4 rounded-xl bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-100 dark:border-neutral-800/60 group-hover:scale-[1.02] transition-transform">
               {getFileIcon(doc.type)}
               <span className="mt-2 text-[11px] font-mono text-neutral-400 dark:text-neutral-500 tabular-nums">
-                {doc.size}
+                {doc.size || '1.0 MB'}
               </span>
             </div>
 
             {/* Bottom Info: Title & Author */}
             <div>
               <h4 className="text-sm font-semibold text-neutral-900 dark:text-white line-clamp-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                {doc.name}
+                {doc.name || 'Untitled Document'}
               </h4>
               <p className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">
-                {doc.dateAdded}
+                {doc.dateAdded || 'Today'}
               </p>
 
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-900/80">
                 <div className="flex items-center gap-2 truncate">
                   <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 ${doc.author.bgColor}`}
+                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 ${authorBgColor}`}
                   >
-                    {doc.author.initial}
+                    {authorInitial}
                   </div>
                   <span className="text-xs text-neutral-600 dark:text-neutral-400 truncate">
-                    {doc.author.name}
+                    {authorName}
                   </span>
                 </div>
 

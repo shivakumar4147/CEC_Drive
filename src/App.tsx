@@ -33,8 +33,8 @@ import {
   UserProfile,
 } from './types';
 
-// Complete University File Explorer Hierarchy:
-// Year (2026-2027) -> Semester (1st to 8th) -> Department (CSE, ECE, ME, AI&DS) -> Section (Sec A, Sec B) -> Subject/Notes Folders -> Files
+// Complete Academic Directory Hierarchy:
+// Year (2026-2027) -> Semester (1st to 8th) -> Department (CSE, ECE, ME, AI&DS) -> Section (Sec A, Sec B) -> Subject Notes -> Files
 const INITIAL_FOLDERS: FolderItem[] = [
   // 1. Academic Years
   {
@@ -86,7 +86,6 @@ const INITIAL_FOLDERS: FolderItem[] = [
   { id: 'folder-web', name: 'Web Technology', parentId: 'sec-cse-a', fileCount: 0, totalSize: '0 MB' },
 ];
 
-// Initial Student Academic Documents linked to folder hierarchy
 const INITIAL_DOCUMENTS: DocumentItem[] = [
   {
     id: 'doc-1',
@@ -166,7 +165,6 @@ const INITIAL_DOCUMENTS: DocumentItem[] = [
   },
 ];
 
-// Initial System Users for the 3 Control Panel Roles
 const INITIAL_USERS: UserProfile[] = [
   {
     id: 'usr-1',
@@ -200,7 +198,6 @@ const INITIAL_USERS: UserProfile[] = [
 ];
 
 export default function App() {
-  // Theme state
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('synapse_theme') as ThemeMode;
@@ -226,11 +223,9 @@ export default function App() {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  // Layout states
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Users & Role State
   const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
   const [currentRole, setCurrentRole] = useState<UserRole>('student');
 
@@ -239,41 +234,65 @@ export default function App() {
     return found || users[0];
   }, [users, currentRole]);
 
-  // Active navigation & Explorer location state
-  const [activeNav, setActiveNav] = useState<ActiveNavKey>('dashboard');
+  const [activeNav, setActiveNav] = useState<ActiveNavKey>('documents');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
 
-  // View mode: 'list' or 'grid'
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
-  // Data states
   const [folders, setFolders] = useState<FolderItem[]>(INITIAL_FOLDERS);
   const [documents, setDocuments] = useState<DocumentItem[]>(INITIAL_DOCUMENTS);
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
 
-  // Sorting & Search
   const [sortField, setSortField] = useState<SortField>('dateAdded');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Modals & Notifications
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [isNewDocModalOpen, setIsNewDocModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Supabase Data Fetching
+  // Safe Supabase Data Fetching with complete schema mapping
   useEffect(() => {
     async function fetchSupabaseData() {
       try {
         const { data: remoteDocs, error: docErr } = await supabase.from('documents').select('*');
-        if (!docErr && remoteDocs && remoteDocs.length > 0) {
-          setDocuments(remoteDocs);
+        if (!docErr && remoteDocs && Array.isArray(remoteDocs) && remoteDocs.length > 0) {
+          const mappedDocs: DocumentItem[] = remoteDocs.map((r: any) => {
+            const authorName = r.author_name || r.authorName || r.author?.name || 'Prof. Sharma';
+            const authorInitial = r.author_initial || r.authorInitial || r.author?.initial || authorName.charAt(0) || 'S';
+            const authorBg = r.author_bg_color || r.authorBgColor || r.author?.bgColor || 'bg-purple-600';
+
+            return {
+              id: String(r.id),
+              name: r.name || 'Untitled Document',
+              dateAdded: r.date_added || r.dateAdded || 'Today',
+              rawDate: r.raw_date || r.rawDate || new Date().toISOString().split('T')[0],
+              author: {
+                name: authorName,
+                initial: authorInitial,
+                bgColor: authorBg,
+              },
+              folderId: r.folder_id ?? r.folderId ?? null,
+              size: r.size || '1.0 MB',
+              type: r.type || 'pdf',
+              tag: r.tag || 'normal',
+              starred: Boolean(r.starred),
+            };
+          });
+          setDocuments(mappedDocs);
         }
 
         const { data: remoteFolders, error: folderErr } = await supabase.from('folders').select('*');
-        if (!folderErr && remoteFolders && remoteFolders.length > 0) {
-          setFolders(remoteFolders);
+        if (!folderErr && remoteFolders && Array.isArray(remoteFolders) && remoteFolders.length > 0) {
+          const mappedFolders: FolderItem[] = remoteFolders.map((r: any) => ({
+            id: String(r.id),
+            name: r.name || 'Folder',
+            parentId: r.parent_id ?? r.parentId ?? null,
+            fileCount: r.file_count ?? r.fileCount ?? 0,
+            totalSize: r.total_size || r.totalSize || '0 MB',
+          }));
+          setFolders(mappedFolders);
         }
       } catch (err) {
         console.log('Supabase sync notice: using initial dataset');
@@ -287,7 +306,6 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Switch role handler
   const handleSwitchRole = (newRole: UserRole) => {
     setCurrentRole(newRole);
     if (newRole === 'admin') {
@@ -297,10 +315,9 @@ export default function App() {
     } else {
       setActiveNav('dashboard');
     }
-    showToast(`Switched control panel view to ${newRole.toUpperCase()} mode`);
+    showToast(`Switched view to ${newRole.toUpperCase()} Control Panel`);
   };
 
-  // User Management Handlers for Admin
   const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
     setUsers((prev) =>
       prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
@@ -322,26 +339,31 @@ export default function App() {
     showToast('User removed');
   };
 
-  // Helper to recursively get all subfolder IDs under a folder
+  // Safe helper to recursively get all subfolder IDs under a folder
   const getAllSubfolderIds = (folderId: string, allFolders: FolderItem[]): string[] => {
-    const directChildren = allFolders.filter((f) => f.parentId === folderId);
+    if (!folderId || !Array.isArray(allFolders)) return [];
+    const directChildren = allFolders.filter((f) => f && f.parentId === folderId);
     let ids = directChildren.map((f) => f.id);
     directChildren.forEach((child) => {
-      ids = [...ids, ...getAllSubfolderIds(child.id, allFolders)];
+      if (child && child.id) {
+        ids = [...ids, ...getAllSubfolderIds(child.id, allFolders)];
+      }
     });
     return ids;
   };
 
-  // Dynamic Computation of Folders with Aggregated File Counts & Sizes
+  // Safe Computation of Folders with Aggregated File Counts & Sizes
   const computedFolders = useMemo(() => {
+    if (!Array.isArray(folders)) return [];
     return folders.map((folder) => {
+      if (!folder) return folder;
       const allNestedFolderIds = [folder.id, ...getAllSubfolderIds(folder.id, folders)];
-      const folderDocs = documents.filter((d) => d.folderId && allNestedFolderIds.includes(d.folderId));
+      const folderDocs = documents.filter((d) => d && d.folderId && allNestedFolderIds.includes(d.folderId));
       const count = folderDocs.length;
 
       let totalMB = 0;
       folderDocs.forEach((d) => {
-        const val = parseFloat(d.size.replace(/[^0-9.]/g, '')) || 0;
+        const val = parseFloat(String(d?.size || '0').replace(/[^0-9.]/g, '')) || 0;
         totalMB += val;
       });
 
@@ -353,17 +375,20 @@ export default function App() {
     });
   }, [folders, documents]);
 
-  // Compute Breadcrumb Navigation Path
+  // Safe Computation of Breadcrumbs
   const breadcrumbs = useMemo(() => {
     const crumbs: { id: string | null; name: string }[] = [{ id: null, name: 'Folders' }];
+    if (!currentFolderId || !Array.isArray(folders)) return crumbs;
 
-    let currId = currentFolderId;
+    let currId: string | null = currentFolderId;
     const pathStack: { id: string; name: string }[] = [];
+    const visited = new Set<string>();
 
-    while (currId) {
-      const found = folders.find((f) => f.id === currId);
+    while (currId && !visited.has(currId)) {
+      visited.add(currId);
+      const found = folders.find((f) => f && f.id === currId);
       if (found) {
-        pathStack.unshift({ id: found.id, name: found.name });
+        pathStack.unshift({ id: found.id, name: found.name || 'Folder' });
         currId = found.parentId || null;
       } else {
         break;
@@ -375,45 +400,46 @@ export default function App() {
 
   // Direct Subfolders of current active directory location
   const activeSubfolders = useMemo(() => {
-    return computedFolders.filter((f) => f.parentId === currentFolderId);
+    if (!Array.isArray(computedFolders)) return [];
+    return computedFolders.filter((f) => f && f.parentId === currentFolderId);
   }, [computedFolders, currentFolderId]);
 
   // Documents in current active directory location or filtered view
   const filteredAndSortedDocuments = useMemo(() => {
+    if (!Array.isArray(documents)) return [];
     let result = [...documents];
 
     if (activeNav === 'tag-important') {
-      result = result.filter((d) => d.tag === 'important');
+      result = result.filter((d) => d && d.tag === 'important');
     } else if (activeNav === 'tag-normal') {
-      result = result.filter((d) => d.tag === 'normal');
+      result = result.filter((d) => d && d.tag === 'normal');
     } else if (activeNav === 'documents') {
-      result = result.filter((d) => (d.folderId || null) === currentFolderId);
+      result = result.filter((d) => d && (d.folderId || null) === currentFolderId);
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
         (d) =>
-          d.name.toLowerCase().includes(q) ||
-          d.author.name.toLowerCase().includes(q) ||
-          d.dateAdded.toLowerCase().includes(q)
+          (d.name || '').toLowerCase().includes(q) ||
+          (d.author?.name || '').toLowerCase().includes(q) ||
+          (d.dateAdded || '').toLowerCase().includes(q)
       );
     }
 
     return result.sort((a, b) => {
       let comparison = 0;
       if (sortField === 'name') {
-        comparison = a.name.localeCompare(b.name);
+        comparison = (a.name || '').localeCompare(b.name || '');
       } else if (sortField === 'dateAdded') {
-        comparison = a.rawDate.localeCompare(b.rawDate);
+        comparison = (a.rawDate || '').localeCompare(b.rawDate || '');
       } else if (sortField === 'author') {
-        comparison = a.author.name.localeCompare(b.author.name);
+        comparison = (a.author?.name || '').localeCompare(b.author?.name || '');
       }
       return sortOrder === 'asc' ? comparison : -comparison;
     });
   }, [documents, activeNav, currentFolderId, searchQuery, sortField, sortOrder]);
 
-  // Folder Explorer Logic Actions
   const handleCreateFolder = async (name: string, parentId: string | null) => {
     const newFolder: FolderItem = {
       id: `folder-${Date.now()}`,
@@ -425,11 +451,10 @@ export default function App() {
     setFolders((prev) => [...prev, newFolder]);
     showToast(`Created folder "${name}"`);
 
-    // Sync to Supabase
     try {
       await supabase.from('folders').insert([newFolder]);
     } catch (e) {
-      // ignore offline fallback
+      // offline fallback
     }
   };
 
@@ -469,7 +494,6 @@ export default function App() {
     showToast(`Moved ${count} file(s) to ${targetFolder ? `"${targetFolder.name}"` : 'Folders'}`);
   };
 
-  // Selection handlers
   const handleToggleSelectFolder = (id: string) => {
     setSelectedFolderIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
@@ -546,7 +570,6 @@ export default function App() {
     setDocuments((prev) => [newDoc, ...prev]);
     showToast(`Document "${newDoc.name}" published`);
 
-    // Sync to Supabase
     try {
       await supabase.from('documents').insert([newDoc]);
     } catch (e) {
@@ -583,15 +606,18 @@ export default function App() {
           onSwitchRole={handleSwitchRole}
           folders={computedFolders}
           currentFolderId={currentFolderId}
-          onNavigateFolder={setCurrentFolderId}
+          onNavigateFolder={(id) => {
+            setCurrentFolderId(id);
+            setActiveNav('documents');
+          }}
           counts={{
             dashboard: 48,
             calendar: 12,
             inbox: 127,
             myTasks: 21,
             folders: folders.length + documents.length,
-            important: documents.filter((d) => d.tag === 'important').length,
-            normal: documents.filter((d) => d.tag === 'normal').length,
+            important: documents.filter((d) => d && d.tag === 'important').length,
+            normal: documents.filter((d) => d && d.tag === 'normal').length,
           }}
         />
       </div>
@@ -624,6 +650,7 @@ export default function App() {
               currentFolderId={currentFolderId}
               onNavigateFolder={(id) => {
                 setCurrentFolderId(id);
+                setActiveNav('documents');
                 setMobileMenuOpen(false);
               }}
             />
@@ -648,7 +675,7 @@ export default function App() {
               <FolderIcon className="w-4 h-4 text-blue-500 fill-blue-500/20" />
               <button
                 onClick={() => {
-                  setActiveNav('dashboard');
+                  setActiveNav('documents');
                   setCurrentFolderId(null);
                 }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors font-medium"
@@ -670,15 +697,13 @@ export default function App() {
                   : activeNav === 'my-tasks'
                   ? 'My Tasks'
                   : currentFolderId
-                  ? folders.find((f) => f.id === currentFolderId)?.name
+                  ? folders.find((f) => f.id === currentFolderId)?.name || 'Folder'
                   : 'File Explorer'}
               </span>
             </nav>
           </div>
 
-          {/* Quick Actions in Header */}
           <div className="flex items-center gap-2.5 sm:gap-3">
-            {/* Control Panel Role Badge */}
             <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-bold">
               {currentUser.role === 'admin' ? (
                 <>
@@ -688,7 +713,7 @@ export default function App() {
               ) : currentUser.role === 'uploader' ? (
                 <>
                   <UploadCloud className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-amber-600 dark:text-amber-400">Lecturer / Uploader Mode</span>
+                  <span className="text-amber-600 dark:text-amber-400">Lecturer Mode</span>
                 </>
               ) : (
                 <>
@@ -698,7 +723,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Search Input */}
             <div className="relative hidden sm:block w-44 md:w-56 lg:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
               <input
@@ -769,7 +793,10 @@ export default function App() {
                 folders={computedFolders}
                 selectedFolderIds={selectedFolderIds}
                 selectedDocIds={selectedDocIds}
-                onNavigateToFolder={setCurrentFolderId}
+                onNavigateToFolder={(id) => {
+                  setCurrentFolderId(id);
+                  setActiveNav('documents');
+                }}
                 onCreateFolder={handleCreateFolder}
                 onRenameFolder={handleRenameFolder}
                 onDeleteFolder={handleDeleteFolder}
@@ -782,7 +809,7 @@ export default function App() {
                 <div>
                   <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-neutral-900 dark:text-white">
                     {currentFolderId
-                      ? folders.find((f) => f.id === currentFolderId)?.name
+                      ? folders.find((f) => f.id === currentFolderId)?.name || 'Folder Directory'
                       : 'File Directory & Resource Folders'}
                   </h1>
                 </div>
@@ -876,7 +903,7 @@ export default function App() {
                       No files in this directory folder
                     </p>
                     <p className="text-xs text-neutral-400 mt-1 max-w-sm">
-                      Use the "Add File" button above or drag & drop documents into this folder.
+                      Use the "New File" button above or drag & drop documents into this folder.
                     </p>
                   </div>
                 ) : viewMode === 'list' ? (

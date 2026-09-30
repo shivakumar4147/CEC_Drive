@@ -5,9 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
-  MoreVertical,
   Download,
-  Share2,
   Trash2,
   Eye,
 } from 'lucide-react';
@@ -30,8 +28,8 @@ interface DocumentTableProps {
 }
 
 export const DocumentTable: React.FC<DocumentTableProps> = ({
-  documents,
-  selectedIds,
+  documents = [],
+  selectedIds = [],
   onToggleSelect,
   onToggleSelectAll,
   onDocumentClick,
@@ -41,7 +39,8 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
   onDownload,
   onDelete,
 }) => {
-  const allSelected = documents.length > 0 && selectedIds.length === documents.length;
+  const safeDocs = Array.isArray(documents) ? documents : [];
+  const allSelected = safeDocs.length > 0 && selectedIds.length === safeDocs.length;
   const someSelected = selectedIds.length > 0 && !allSelected;
 
   return (
@@ -140,8 +139,12 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
         </thead>
 
         <tbody className="divide-y divide-neutral-100/80 dark:divide-neutral-900/60">
-          {documents.map((doc) => {
+          {safeDocs.map((doc) => {
+            if (!doc) return null;
             const isSelected = selectedIds.includes(doc.id);
+            const authorName = doc.author?.name || 'Lecturer';
+            const authorInitial = doc.author?.initial || authorName.charAt(0) || 'L';
+            const authorBgColor = doc.author?.bgColor || 'bg-blue-600';
 
             return (
               <tr
@@ -174,7 +177,7 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
                     aria-checked={isSelected}
                     role="checkbox"
                   >
-                    {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                    {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                   </button>
                 </td>
 
@@ -182,32 +185,32 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
                 <td className="py-3.5 px-3">
                   <div className="flex items-center gap-2.5 max-w-sm sm:max-w-md">
                     <span className="text-sm font-medium text-neutral-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      {doc.name}
+                      {doc.name || 'Untitled Document'}
                     </span>
                   </div>
                 </td>
 
                 {/* Date Added */}
                 <td className="py-3.5 px-3 hidden sm:table-cell text-xs text-neutral-500 dark:text-neutral-400 font-normal">
-                  {doc.dateAdded}
+                  {doc.dateAdded || 'Today'}
                 </td>
 
                 {/* Added By: Colored Avatar + Name */}
                 <td className="py-3.5 px-3">
                   <div className="flex items-center gap-2.5">
                     <div
-                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0 ${doc.author.bgColor}`}
+                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0 ${authorBgColor}`}
                       aria-hidden="true"
                     >
-                      {doc.author.initial}
+                      {authorInitial}
                     </div>
                     <span className="text-xs text-neutral-700 dark:text-neutral-300 font-medium truncate">
-                      {doc.author.name}
+                      {authorName}
                     </span>
                   </div>
                 </td>
 
-                {/* Hover Quick Actions */}
+                {/* Quick Actions */}
                 <td
                   className="py-3.5 pr-4 pl-2 text-right"
                   onClick={(e) => e.stopPropagation()}
@@ -249,10 +252,10 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
         </tbody>
       </table>
 
-      {documents.length === 0 && (
+      {safeDocs.length === 0 && (
         <div className="text-center py-12 text-neutral-400 dark:text-neutral-500">
           <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p className="text-sm font-medium">No documents found matching this filter</p>
+          <p className="text-sm font-medium">No documents found in this directory folder</p>
         </div>
       )}
     </div>
