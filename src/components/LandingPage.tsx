@@ -100,9 +100,37 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           },
         });
 
+        // Helper function to write to Supabase public.profiles table
+        const saveProfileToSupabase = async (userId: string, userEmail: string) => {
+          try {
+            const profilePayload = {
+              id: userId,
+              email: userEmail,
+              name: selectedRole === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
+              role: selectedRole === 'student' ? 'student' : 'uploader',
+              usn: selectedRole === 'student' ? studentUSN || null : null,
+              academic_year: selectedRole === 'student' ? studentAcademicYear || null : null,
+              department: selectedRole === 'student' ? studentDept || 'CSE' : lecturerDept || 'CSE',
+              semester: selectedRole === 'student' ? studentSem || '5th Sem' : null,
+              section: selectedRole === 'student' ? studentSec || 'Sec A' : null,
+              course: selectedRole === 'uploader' ? lecturerCourse || null : null,
+              initial: ((selectedRole === 'student' ? studentName : lecturerName) || 'U').charAt(0).toUpperCase(),
+              bg_color: selectedRole === 'student' ? 'bg-blue-600' : 'bg-amber-600',
+              updated_at: new Date().toISOString(),
+            };
+            const { error: upsertErr } = await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' });
+            if (upsertErr) {
+              console.warn('Supabase profiles upsert error:', upsertErr.message);
+            } else {
+              console.log('Successfully saved profile to Supabase profiles table!');
+            }
+          } catch (e) {
+            console.error('Failed to sync profile to Supabase:', e);
+          }
+        };
+
         if (signUpError) {
           if (signUpError.message.includes('rate limit') || signUpError.message.includes('rate_limit')) {
-            // Handle rate limit gracefully: proceed with user session using provided details
             onLoginSuccess(selectedRole === 'student' ? 'student' : 'uploader', {
               name: metadata.name || 'User',
               department: metadata.department || 'CSE',
@@ -116,29 +144,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           return;
         }
 
-        const activeUser = signUpData.user || signInData?.user;
-        if (activeUser) {
-          try {
-            await supabase.from('profiles').upsert({
-              id: activeUser.id,
-              email: activeUser.email,
-              name: metadata.name || 'User',
-              role: selectedRole === 'student' ? 'student' : 'uploader',
-              usn: metadata.usn || null,
-              academic_year: metadata.academic_year || null,
-              department: metadata.department || 'CSE',
-              semester: metadata.semester || '5th Sem',
-              section: metadata.section || 'Sec A',
-              course: metadata.course || null,
-              initial: (metadata.name || 'U').charAt(0).toUpperCase(),
-              bg_color: selectedRole === 'student' ? 'bg-blue-600' : 'bg-amber-600',
-            });
-          } catch (profileErr) {
-            console.warn('Profile upsert warning:', profileErr);
-          }
-        }
-
         if (signUpData.user) {
+          await saveProfileToSupabase(signUpData.user.id, signUpData.user.email || email);
           onLoginSuccess(selectedRole === 'student' ? 'student' : 'uploader', {
             name: metadata.name || 'User',
             department: metadata.department || 'CSE',
@@ -152,20 +159,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       if (signInData?.user) {
         const meta = signInData.user.user_metadata || {};
         try {
-          await supabase.from('profiles').upsert({
-            id: signInData.user.id,
-            email: signInData.user.email,
-            name: meta.name || (selectedRole === 'student' ? studentName : lecturerName) || 'User',
-            role: selectedRole === 'student' ? 'student' : 'uploader',
-            usn: meta.usn || studentUSN || null,
-            academic_year: meta.academic_year || studentAcademicYear || null,
-            department: meta.department || (selectedRole === 'student' ? studentDept : lecturerDept) || 'CSE',
-            semester: meta.semester || studentSem || '5th Sem',
-            section: meta.section || studentSec || 'Sec A',
-            course: meta.course || lecturerCourse || null,
-          });
+          await supabase.from('profiles').upsert(
+            {
+              id: signInData.user.id,
+              email: signInData.user.email,
+              name: meta.name || (selectedRole === 'student' ? studentName : lecturerName) || 'User',
+              role: selectedRole === 'student' ? 'student' : 'uploader',
+              usn: meta.usn || studentUSN || null,
+              academic_year: meta.academic_year || studentAcademicYear || null,
+              department: meta.department || (selectedRole === 'student' ? studentDept : lecturerDept) || 'CSE',
+              semester: meta.semester || studentSem || '5th Sem',
+              section: meta.section || studentSec || 'Sec A',
+              course: meta.course || lecturerCourse || null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          );
         } catch (e) {
-          // ignore profile sync error
+          console.warn('Profiles upsert warning on sign in:', e);
         }
 
         onLoginSuccess(selectedRole === 'student' ? 'student' : 'uploader', {
