@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  UserPlus,
 } from 'lucide-react';
 import { SynapseLogo } from './SynapseLogo';
 import { ThemeMode, UserRole, UserProfile } from '../types';
@@ -25,7 +26,7 @@ import { supabase } from '../lib/supabase';
 interface LandingPageProps {
   theme: ThemeMode;
   onToggleTheme: () => void;
-  onLoginSuccess: (selectedRole?: UserRole, userDetails?: Partial<UserProfile>) => void;
+  onLoginSuccess: (selectedRole?: UserRole, userDetails?: Partial<UserProfile> & { id?: string }) => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -33,12 +34,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onToggleTheme,
   onLoginSuccess,
 }) => {
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
   const [selectedRole, setSelectedRole] = useState<'student' | 'uploader'>('student');
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [resetSubmitted, setResetSubmitted] = useState(false);
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Common Form State
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // Student Form State
   const [studentName, setStudentName] = useState('');
@@ -47,35 +53,132 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [studentDept, setStudentDept] = useState('');
   const [studentSem, setStudentSem] = useState('');
   const [studentSec, setStudentSec] = useState('');
-  const [studentEmail, setStudentEmail] = useState('');
-  const [studentPassword, setStudentPassword] = useState('');
 
   // Lecturer Form State
   const [lecturerName, setLecturerName] = useState('');
   const [lecturerDept, setLecturerDept] = useState('');
   const [lecturerCourse, setLecturerCourse] = useState('');
-  const [lecturerEmail, setLecturerEmail] = useState('');
-  const [lecturerPassword, setLecturerPassword] = useState('');
+
+  // Helper function to write to Supabase public.profiles table
+  const saveProfileToSupabase = async (userId: string, userEmail: string, role: UserRole) => {
+    try {
+      const fullPayload: any =
+        role === 'student'
+          ? {
+              id: userId,
+              email: userEmail,
+              name: studentName || 'Student',
+              role: 'student',
+              usn: studentUSN || null,
+              academic_year: studentAcademicYear || null,
+              department: studentDept || 'CSE',
+              semester: studentSem || null,
+              section: studentSec || 'Sec A',
+            }
+          : {
+              id: userId,
+              email: userEmail,
+              name: lecturerName || 'Lecturer',
+              role: 'uploader',
+              department: lecturerDept || 'CSE',
+              course: lecturerCourse || null,
+            };
+
+      const { error: fullErr } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
+      if (fullErr) {
+        console.warn('Full profile upsert error, trying minimal core schema:', fullErr.message);
+        const minimalPayload = {
+          id: userId,
+          email: userEmail,
+          name: role === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
+          role: role,
+          usn: role === 'student' ? studentUSN || null : null,
+        };
+        await supabase.from('profiles').upsert(minimalPayload, { onConflict: 'id' });
+      }
+    } catch (e) {
+      console.error('Failed to sync profile to Supabase:', e);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
     setIsLoading(true);
 
-    const email = selectedRole === 'student' ? studentEmail : lecturerEmail;
-    const password = selectedRole === 'student' ? studentPassword : lecturerPassword;
+    const activeEmail = email.trim();
+
+    if (!activeEmail || !password) {
+      setAuthError('Please enter both Email and Password.');
+      setIsLoading(false);
+      return;
+    }
 
     try {
-      // 1. Attempt Sign In with Supabase Auth
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      if (authMode === 'signin') {
+        // ==========================================
+        // STRICT SIGN IN MODE: Verify Email in DB
+        // ==========================================
+        try {
+          const { data: existingProfile } = await supabase
+            .from('profiles')
+            .select('id, email')
+            .eq('email', activeEmail.toLowerCase())
+            .maybeSingle();
 
-      if (signInError) {
-        // 2. If account does not exist yet or credentials failed, attempt auto Sign Up with user metadata
+          if (!existingProfile) {
+            setAuthError(`No account found with email "${activeEmail}". Please create an account first.`);
+            setAuthMode('signup');
+            setIsLoading(false);
+            return;
+          }
+        } catch (checkErr) {
+          console.warn('Profile lookup warning:', checkErr);
+        }
+
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: activeEmail,
+          password: password,
+        });
+
+        if (signInError) {
+          if (
+            signInError.message.toLowerCase().includes('invalid login credentials') ||
+            signInError.message.toLowerCase().includes('invalid_grant') ||
+            signInError.message.toLowerCase().includes('user not found')
+          ) {
+            setAuthError('Invalid credentials. If you do not have an account yet, please create an account below.');
+            setAuthMode('signup');
+          } else {
+            setAuthError(signInError.message);
+          }
+          setIsLoading(false);
+          return;
+        }
+
+        if (signInData?.user) {
+          const meta = signInData.user.user_metadata || {};
+          const detectedRole: UserRole = (meta.role as UserRole) || (selectedRole === 'student' ? 'student' : 'uploader');
+          const userName = meta.name || activeEmail.split('@')[0] || 'User';
+
+          onLoginSuccess(detectedRole, {
+            id: signInData.user.id,
+            name: userName,
+            email: signInData.user.email || activeEmail,
+            role: detectedRole,
+            department: meta.department || (detectedRole === 'student' ? 'CSE' : 'CSE'),
+            section: meta.section || 'Sec A',
+            initial: (userName[0] || 'U').toUpperCase(),
+            bgColor: detectedRole === 'student' ? 'bg-blue-600' : 'bg-amber-600',
+          });
+        }
+      } else {
+        // ==========================================
+        // CREATE ACCOUNT MODE: Dedicated Registration
+        // ==========================================
+        const role = selectedRole === 'student' ? 'student' : 'uploader';
         const metadata =
-          selectedRole === 'student'
+          role === 'student'
             ? {
                 name: studentName,
                 usn: studentUSN,
@@ -93,131 +196,45 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               };
 
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
+          email: activeEmail,
+          password: password,
           options: {
             data: metadata,
           },
         });
 
-        // Helper function to write to Supabase public.profiles table with fallback resilience
-        const saveProfileToSupabase = async (userId: string, userEmail: string) => {
-          try {
-            const fullPayload = {
-              id: userId,
-              email: userEmail,
-              name: selectedRole === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
-              role: selectedRole === 'student' ? 'student' : 'uploader',
-              usn: selectedRole === 'student' ? studentUSN || null : null,
-              academic_year: selectedRole === 'student' ? studentAcademicYear || null : null,
-              department: selectedRole === 'student' ? studentDept || 'CSE' : lecturerDept || 'CSE',
-              semester: selectedRole === 'student' ? studentSem || '5th Sem' : null,
-              section: selectedRole === 'student' ? studentSec || 'Sec A' : null,
-              course: selectedRole === 'uploader' ? lecturerCourse || null : null,
-              initial: ((selectedRole === 'student' ? studentName : lecturerName) || 'U').charAt(0).toUpperCase(),
-              bg_color: selectedRole === 'student' ? 'bg-blue-600' : 'bg-amber-600',
-              updated_at: new Date().toISOString(),
-            };
-
-            // 1. Try full upsert
-            const { error: fullErr } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
-            if (fullErr) {
-              console.warn('Full profile upsert error, trying minimal core schema:', fullErr.message);
-              // 2. Fallback to minimal core fields (id, name, email, role, usn) if extra columns do not exist in DB yet
-              const minimalPayload = {
-                id: userId,
-                email: userEmail,
-                name: selectedRole === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
-                role: selectedRole === 'student' ? 'student' : 'uploader',
-                usn: selectedRole === 'student' ? studentUSN || null : null,
-              };
-              const { error: minErr } = await supabase.from('profiles').upsert(minimalPayload, { onConflict: 'id' });
-              if (minErr) {
-                console.error('Minimal profiles upsert error:', minErr.message);
-              } else {
-                console.log('Successfully saved minimal profile to Supabase!');
-              }
-            } else {
-              console.log('Successfully saved full profile to Supabase profiles table!');
-            }
-          } catch (e) {
-            console.error('Failed to sync profile to Supabase:', e);
-          }
-        };
-
         if (signUpError) {
-          if (signUpError.message.includes('rate limit') || signUpError.message.includes('rate_limit')) {
-            onLoginSuccess(selectedRole === 'student' ? 'student' : 'uploader', {
-              name: metadata.name || 'User',
-              department: metadata.department || 'CSE',
-              section: metadata.section || 'Sec A',
-            });
-            setIsLoading(false);
-            return;
-          }
           if (
             signUpError.message.toLowerCase().includes('already registered') ||
-            signUpError.message.toLowerCase().includes('already exists') ||
-            signInError.message.toLowerCase().includes('invalid login credentials')
+            signUpError.message.toLowerCase().includes('already exists')
           ) {
-            setAuthError(
-              'Incorrect password for this email account. If you forgot your password, please click "Forgot password?" below to reset it.'
-            );
+            setAuthError('This email is already registered. Please switch to the "Sign In" tab to log in.');
           } else {
             setAuthError(signUpError.message);
           }
           setIsLoading(false);
-          return;
+          return; // Strictly stop execution on sign up error
         }
 
-        if (signUpData.user) {
-          await saveProfileToSupabase(signUpData.user.id, signUpData.user.email || email);
-          onLoginSuccess(selectedRole === 'student' ? 'student' : 'uploader', {
-            name: metadata.name || 'User',
-            department: metadata.department || 'CSE',
-            section: metadata.section || 'Sec A',
+        if (signUpData?.user) {
+          await saveProfileToSupabase(signUpData.user.id, signUpData.user.email || activeEmail, role);
+          const userName = (role === 'student' ? studentName : lecturerName) || activeEmail.split('@')[0];
+
+          onLoginSuccess(role, {
+            id: signUpData.user.id,
+            name: userName,
+            email: signUpData.user.email || activeEmail,
+            role: role,
+            department: role === 'student' ? studentDept || 'CSE' : lecturerDept || 'CSE',
+            section: role === 'student' ? studentSec || 'Sec A' : 'Sec A',
+            initial: (userName[0] || 'U').toUpperCase(),
+            bgColor: role === 'student' ? 'bg-blue-600' : 'bg-amber-600',
           });
-          setIsLoading(false);
-          return;
         }
-      }
-
-      if (signInData?.user) {
-        const meta = signInData.user.user_metadata || {};
-        try {
-          await supabase.from('profiles').upsert(
-            {
-              id: signInData.user.id,
-              email: signInData.user.email,
-              name: meta.name || (selectedRole === 'student' ? studentName : lecturerName) || 'User',
-              role: selectedRole === 'student' ? 'student' : 'uploader',
-              usn: meta.usn || studentUSN || null,
-              academic_year: meta.academic_year || studentAcademicYear || null,
-              department: meta.department || (selectedRole === 'student' ? studentDept : lecturerDept) || 'CSE',
-              semester: meta.semester || studentSem || '5th Sem',
-              section: meta.section || studentSec || 'Sec A',
-              course: meta.course || lecturerCourse || null,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' }
-          );
-        } catch (e) {
-          console.warn('Profiles upsert warning on sign in:', e);
-        }
-
-        onLoginSuccess(selectedRole === 'student' ? 'student' : 'uploader', {
-          name: meta.name || (selectedRole === 'student' ? studentName : lecturerName) || 'User',
-          department: meta.department || (selectedRole === 'student' ? studentDept : lecturerDept) || 'CSE',
-          section: meta.section || studentSec || 'Sec A',
-        });
       }
     } catch (err: any) {
-      console.error('Supabase Auth error:', err);
-      // Fallback local sign in if network issue occurs
-      onLoginSuccess(selectedRole === 'student' ? 'student' : 'uploader', {
-        name: selectedRole === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
-        department: selectedRole === 'student' ? studentDept || 'CSE' : lecturerDept || 'CSE',
-      });
+      console.error('Authentication process error:', err);
+      setAuthError(err.message || 'An error occurred during authentication. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -240,7 +257,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Main Responsive Card Container */}
       <div className="w-full max-w-4xl bg-white dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-900 rounded-3xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-12 max-h-[98vh] my-auto">
         
-        {/* Left Column: Campus Image Showcase (Visible on Medium+ screens) */}
+        {/* Left Column: Campus Image Showcase */}
         <div className="md:col-span-5 relative bg-neutral-900 hidden md:flex flex-col justify-between p-6 overflow-hidden group min-h-[480px]">
           <img
             src="/canara_college_campus.jpg"
@@ -279,17 +296,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Clean Responsive Sign-In Form */}
+        {/* Right Column: Clean Responsive Auth Form */}
         <div className="md:col-span-7 p-3.5 sm:p-5 md:p-6 flex flex-col justify-center space-y-3 bg-white dark:bg-neutral-950 overflow-y-auto max-h-[98vh] scrollbar-thin">
           
           {/* Header row with inline Theme Toggle */}
           <div className="flex items-center justify-between gap-2 pb-1 border-b border-neutral-100 dark:border-neutral-900">
             <div>
               <h1 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white tracking-tight">
-                Sign In to CEC Drive
+                {authMode === 'signin' ? 'Sign In to CEC Drive' : 'Create New Account'}
               </h1>
               <p className="text-[10px] sm:text-[11px] text-neutral-500 dark:text-neutral-400">
-                Select your role and enter your details
+                {authMode === 'signin'
+                  ? 'Enter your email and password to access your drive'
+                  : 'Register your details to create your CEC Drive environment'}
               </p>
             </div>
 
@@ -297,13 +316,47 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <button
               onClick={onToggleTheme}
               className="p-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors shadow-xs shrink-0 cursor-pointer"
-              title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to OLED Black Theme'}
+              title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
             >
               {theme === 'dark' ? (
                 <Moon className="w-4 h-4 text-amber-400 fill-amber-400" />
               ) : (
                 <Sun className="w-4 h-4 text-amber-500" />
               )}
+            </button>
+          </div>
+
+          {/* Mode Switcher: Sign In vs Create Account */}
+          <div className="flex items-center p-1 bg-neutral-100 dark:bg-neutral-900 rounded-xl text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('signin');
+                setAuthError(null);
+              }}
+              className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMode === 'signin'
+                  ? 'bg-white dark:bg-neutral-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('signup');
+                setAuthError(null);
+              }}
+              className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMode === 'signup'
+                  ? 'bg-white dark:bg-neutral-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Create Account</span>
             </button>
           </div>
 
@@ -314,27 +367,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
                 <span className="leading-tight">{authError}</span>
               </div>
-              {authError.toLowerCase().includes('password') && (
+              {authMode === 'signin' && (
                 <button
                   type="button"
                   onClick={() => setIsForgotPasswordOpen(true)}
                   className="px-2 py-1 text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/50 hover:bg-red-200 dark:hover:bg-red-800 rounded-lg transition-colors cursor-pointer shrink-0 border border-red-200 dark:border-red-800"
                 >
-                  Reset Password →
+                  Forgot password?
                 </button>
               )}
             </div>
           )}
 
           {/* 2-Role Switcher Tabs */}
-          <div className="grid grid-cols-2 gap-1 bg-neutral-100 dark:bg-neutral-900 p-1 rounded-xl text-xs font-semibold">
+          <div className="grid grid-cols-2 gap-1 bg-neutral-100/70 dark:bg-neutral-900/70 p-1 rounded-xl text-xs font-semibold">
             <button
               type="button"
               onClick={() => {
                 setSelectedRole('student');
                 setAuthError(null);
               }}
-              className={`py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-1 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 selectedRole === 'student'
                   ? 'bg-white dark:bg-neutral-800 text-blue-600 dark:text-blue-400 shadow-xs font-bold'
                   : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
@@ -349,7 +402,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 setSelectedRole('uploader');
                 setAuthError(null);
               }}
-              className={`py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-1 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 selectedRole === 'uploader'
                   ? 'bg-white dark:bg-neutral-800 text-amber-600 dark:text-amber-400 shadow-xs font-bold'
                   : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
@@ -360,12 +413,57 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </button>
           </div>
 
-          {/* FORM: Student or Lecturer in 2-Column Side-by-Side Mobile Layout */}
-          <form onSubmit={handleSubmit} className="space-y-2">
-            {selectedRole === 'student' ? (
-              /* STUDENT FORM */
+          {/* AUTH FORM */}
+          <form onSubmit={handleSubmit} className="space-y-2.5">
+            {authMode === 'signin' ? (
+              /* SIGN IN FORM (Strict Email & Password) */
+              <div className="space-y-2">
+                <div className="space-y-0.5">
+                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Enter registered email"
+                      className="w-full pl-8 pr-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-0.5">
+                  <div className="flex items-center justify-between text-[10px] sm:text-[11px]">
+                    <label className="font-bold text-neutral-700 dark:text-neutral-300">
+                      Password
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsForgotPasswordOpen(true)}
+                      className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-semibold"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter password"
+                      className="w-full pl-8 pr-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : selectedRole === 'student' ? (
+              /* CREATE ACCOUNT STUDENT FORM */
               <div className="grid grid-cols-2 gap-2">
-                {/* Full Name */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Full Name
@@ -383,7 +481,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
                 </div>
 
-                {/* USN */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     USN
@@ -401,7 +498,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
                 </div>
 
-                {/* Academic Year */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Academic Year
@@ -412,23 +508,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       required
                       value={studentAcademicYear}
                       onChange={(e) => setStudentAcademicYear(e.target.value)}
-                      className={`w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer ${
-                        !studentAcademicYear ? 'text-neutral-400 dark:text-neutral-500' : 'text-neutral-900 dark:text-white font-medium'
-                      }`}
+                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
                     >
-                      <option value="" disabled>
-                        Select Year
-                      </option>
+                      <option value="" disabled>Select Year</option>
                       <option value="2024-25">2024-25</option>
                       <option value="2025-26">2025-26</option>
                       <option value="2026-27">2026-27</option>
-                      <option value="2027-28">2027-28</option>
-                      <option value="2028-29">2028-29</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Department */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Department
@@ -439,24 +528,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       required
                       value={studentDept}
                       onChange={(e) => setStudentDept(e.target.value)}
-                      className={`w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer ${
-                        !studentDept ? 'text-neutral-400 dark:text-neutral-500' : 'text-neutral-900 dark:text-white font-medium'
-                      }`}
+                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
                     >
-                      <option value="" disabled>
-                        Select Dept
-                      </option>
-                      <option value="CSE">CSE (Comp Sci)</option>
-                      <option value="ISE">ISE (Info Sci)</option>
-                      <option value="ECE">ECE (Electronics)</option>
-                      <option value="EEE">EEE (Electrical)</option>
-                      <option value="MECH">Mechanical</option>
+                      <option value="" disabled>Select Dept</option>
+                      <option value="CSE">CSE</option>
+                      <option value="ISE">ISE</option>
+                      <option value="ECE">ECE</option>
+                      <option value="EEE">EEE</option>
+                      <option value="MECH">MECH</option>
                       <option value="AI&DS">AI & DS</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Semester */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Semester
@@ -467,13 +551,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       required
                       value={studentSem}
                       onChange={(e) => setStudentSem(e.target.value)}
-                      className={`w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer ${
-                        !studentSem ? 'text-neutral-400 dark:text-neutral-500' : 'text-neutral-900 dark:text-white font-medium'
-                      }`}
+                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
                     >
-                      <option value="" disabled>
-                        Select Sem
-                      </option>
+                      <option value="" disabled>Select Sem</option>
                       <option value="1st Sem">1st Sem</option>
                       <option value="2nd Sem">2nd Sem</option>
                       <option value="3rd Sem">3rd Sem</option>
@@ -486,7 +566,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
                 </div>
 
-                {/* Section */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Section
@@ -497,13 +576,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       required
                       value={studentSec}
                       onChange={(e) => setStudentSec(e.target.value)}
-                      className={`w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer ${
-                        !studentSec ? 'text-neutral-400 dark:text-neutral-500' : 'text-neutral-900 dark:text-white font-medium'
-                      }`}
+                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
                     >
-                      <option value="" disabled>
-                        Select Sec
-                      </option>
+                      <option value="" disabled>Select Sec</option>
                       <option value="Sec A">Section A</option>
                       <option value="Sec B">Section B</option>
                       <option value="Sec C">Section C</option>
@@ -511,7 +586,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
                 </div>
 
-                {/* Email Address */}
                 <div className="col-span-2 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Email Address
@@ -521,45 +595,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <input
                       type="email"
                       required
-                      value={studentEmail}
-                      onChange={(e) => setStudentEmail(e.target.value)}
-                      placeholder="Enter email (Gmail or College mail ID)"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Enter email address"
                       className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                 </div>
 
-                {/* Password & Forgot Link */}
                 <div className="col-span-2 space-y-0.5">
-                  <div className="flex items-center justify-between text-[10px] sm:text-[11px]">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300">
-                      Password
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setIsForgotPasswordOpen(true)}
-                      className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-semibold"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
+                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                    Password
+                  </label>
                   <div className="relative">
                     <Lock className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
                     <input
                       type="password"
                       required
-                      value={studentPassword}
-                      onChange={(e) => setStudentPassword(e.target.value)}
-                      placeholder="Enter password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Create password"
                       className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                 </div>
               </div>
             ) : (
-              /* LECTURER FORM */
+              /* CREATE ACCOUNT LECTURER FORM */
               <div className="grid grid-cols-2 gap-2">
-                {/* Faculty Name */}
                 <div className="col-span-2 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Faculty Name
@@ -571,13 +634,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       required
                       value={lecturerName}
                       onChange={(e) => setLecturerName(e.target.value)}
-                      placeholder="Enter your full name"
+                      placeholder="Enter faculty name"
                       className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
                   </div>
                 </div>
 
-                {/* Department */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Department
@@ -588,27 +650,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       required
                       value={lecturerDept}
                       onChange={(e) => setLecturerDept(e.target.value)}
-                      className={`w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer ${
-                        !lecturerDept ? 'text-neutral-400 dark:text-neutral-500' : 'text-neutral-900 dark:text-white font-medium'
-                      }`}
+                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
                     >
-                      <option value="" disabled>
-                        Select Dept
-                      </option>
-                      <option value="CSE">CSE (Comp Sci)</option>
-                      <option value="ISE">ISE (Info Sci)</option>
-                      <option value="ECE">ECE (Electronics)</option>
-                      <option value="EEE">EEE (Electrical)</option>
-                      <option value="MECH">Mechanical</option>
+                      <option value="" disabled>Select Dept</option>
+                      <option value="CSE">CSE</option>
+                      <option value="ISE">ISE</option>
+                      <option value="ECE">ECE</option>
+                      <option value="EEE">EEE</option>
+                      <option value="MECH">MECH</option>
                       <option value="AI&DS">AI & DS</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Course Handled */}
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                    Course / Subject
+                    Course Handled
                   </label>
                   <div className="relative">
                     <BookOpen className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
@@ -616,25 +673,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       required
                       value={lecturerCourse}
                       onChange={(e) => setLecturerCourse(e.target.value)}
-                      className={`w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer ${
-                        !lecturerCourse ? 'text-neutral-400 dark:text-neutral-500' : 'text-amber-600 dark:text-amber-400 font-bold'
-                      }`}
+                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
                     >
-                      <option value="" disabled>
-                        Select Course
-                      </option>
+                      <option value="" disabled>Select Course</option>
                       <option value="DBMS">DBMS</option>
                       <option value="SE">SE</option>
-                      <option value="RM">RM</option>
-                      <option value="OS">OS</option>
                       <option value="CN">CN</option>
+                      <option value="OS">OS</option>
                       <option value="AI">AI</option>
-                      <option value="WT">WT</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Email Address */}
                 <div className="col-span-2 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
                     Email Address
@@ -644,36 +694,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <input
                       type="email"
                       required
-                      value={lecturerEmail}
-                      onChange={(e) => setLecturerEmail(e.target.value)}
-                      placeholder="Enter email (Gmail or College mail ID)"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Enter email address"
                       className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
                   </div>
                 </div>
 
-                {/* Password & Forgot Link */}
                 <div className="col-span-2 space-y-0.5">
-                  <div className="flex items-center justify-between text-[10px] sm:text-[11px]">
-                    <label className="font-bold text-neutral-700 dark:text-neutral-300">
-                      Password
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setIsForgotPasswordOpen(true)}
-                      className="text-amber-600 dark:text-amber-400 hover:underline cursor-pointer font-semibold"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
+                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                    Password
+                  </label>
                   <div className="relative">
                     <Lock className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
                     <input
                       type="password"
                       required
-                      value={lecturerPassword}
-                      onChange={(e) => setLecturerPassword(e.target.value)}
-                      placeholder="Enter password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Create password"
                       className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
                   </div>
@@ -693,12 +733,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               {isLoading ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Signing In...</span>
+                  <span>{authMode === 'signin' ? 'Signing In...' : 'Creating Account...'}</span>
                 </>
-              ) : (
+              ) : authMode === 'signin' ? (
                 <>
                   <span>Sign In to CEC Drive</span>
                   <LogIn className="w-3.5 h-3.5" />
+                </>
+              ) : (
+                <>
+                  <span>Create Account & Enter</span>
+                  <UserPlus className="w-3.5 h-3.5" />
                 </>
               )}
             </button>
@@ -734,23 +779,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     Reset Password
                   </h3>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-xs mx-auto">
-                    Enter your email address (Gmail or College Mail) or USN to receive a recovery link
+                    Enter your email address to receive a recovery link
                   </p>
                 </div>
 
                 <form onSubmit={handleSendPasswordReset} className="space-y-3">
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                      Email or USN / Faculty ID
+                      Email Address
                     </label>
                     <div className="relative">
                       <Mail className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-2.5" />
                       <input
-                        type="text"
+                        type="email"
                         required
                         value={resetIdentifier}
                         onChange={(e) => setResetIdentifier(e.target.value)}
-                        placeholder="Enter Gmail, College Email, or USN"
+                        placeholder="Enter email address"
                         className="w-full pl-8 pr-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </div>

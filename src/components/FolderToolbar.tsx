@@ -46,6 +46,7 @@ interface FolderToolbarProps {
   onMoveSelectedDocs: (targetFolderId: string | null) => void;
   onDownloadSelectedFolders?: () => void;
   onDownloadSelected?: () => void;
+  onDeleteSelected?: () => void;
   onTogglePinFolder?: (folderId: string) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onSortFieldChange: (field: SortField) => void;
@@ -73,6 +74,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
   onMoveSelectedDocs,
   onDownloadSelectedFolders,
   onDownloadSelected,
+  onDeleteSelected,
   onTogglePinFolder,
   onViewModeChange,
   onSortFieldChange,
@@ -124,33 +126,37 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
   const isRenameActive = currentFolderId !== null || selectedFolderIds.length === 1;
 
   const handleOpenRenameCurrent = () => {
-    if (currentFolder) {
-      setTargetRenameFolderId(currentFolder.id);
-      setRenameFolderName(currentFolder.name);
-      setIsRenameModalOpen(true);
-    } else if (selectedFolderIds.length === 1) {
+    if (selectedFolderIds.length === 1) {
       const folderToRename = folders.find((f) => f.id === selectedFolderIds[0]);
       if (folderToRename) {
         setTargetRenameFolderId(folderToRename.id);
         setRenameFolderName(folderToRename.name);
         setIsRenameModalOpen(true);
       }
+    } else if (currentFolder) {
+      setTargetRenameFolderId(currentFolder.id);
+      setRenameFolderName(currentFolder.name);
+      setIsRenameModalOpen(true);
     }
   };
 
-  const isDeleteActive = currentFolderId !== null || selectedFolderIds.length > 0 || selectedDocIds.length > 0;
+  const isDeleteActive = selectedFolderIds.length > 0 || selectedDocIds.length > 0 || currentFolderId !== null;
 
   const handleDeleteCurrent = () => {
-    if (currentFolderId) {
+    if (selectedFolderIds.length > 0) {
+      if (confirm(`Are you sure you want to delete ${selectedFolderIds.length} selected folder(s)?`)) {
+        selectedFolderIds.forEach((id) => onDeleteFolder(id));
+      }
+    } else if (selectedDocIds.length > 0) {
+      if (onDeleteSelected) {
+        onDeleteSelected();
+      }
+    } else if (currentFolderId) {
       if (confirm(`Are you sure you want to delete folder "${currentFolder?.name}"?`)) {
         onDeleteFolder(currentFolderId);
         const parentIndex = breadcrumbs.length - 2;
         const parentId = parentIndex >= 0 ? breadcrumbs[parentIndex].id : null;
         onNavigateToFolder(parentId);
-      }
-    } else if (selectedFolderIds.length > 0) {
-      if (confirm(`Delete ${selectedFolderIds.length} selected folder(s)?`)) {
-        selectedFolderIds.forEach((id) => onDeleteFolder(id));
       }
     }
   };

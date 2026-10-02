@@ -11,6 +11,21 @@ export interface UserProfile {
   bgColor: string;
 }
 
+export interface FileItem {
+  id: string;
+  name: string;
+  folder_id?: string | null;
+  uploaded_by?: string | null;
+  cloudinary_public_id: string;
+  cloudinary_url: string;
+  resource_type: string;
+  mime_type: string;
+  file_size: string;
+  original_filename: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface DocumentItem {
   id: string;
   name: string;
@@ -22,10 +37,19 @@ export interface DocumentItem {
     bgColor: string;
   };
   folderId?: string | null;
+  uploadedBy?: string | null;
   size: string;
   type: 'pdf' | 'doc' | 'sheet' | 'spec' | 'presentation';
   tag?: 'important' | 'normal';
   starred?: boolean;
+  fileUrl?: string;
+  cloudinaryPublicId?: string;
+  resourceType?: string;
+  mimeType?: string;
+  originalFilename?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface FolderItem {
@@ -37,6 +61,9 @@ export interface FolderItem {
   selected?: boolean;
   color?: string;
   createdAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export type ViewMode = 'list' | 'grid';
@@ -54,5 +81,6 @@ export type ActiveNavKey =
   | 'documents'
   | 'admin-panel'
   | 'lecturer-panel'
+  | 'recycle-bin'
   | 'tag-important'
   | 'tag-normal';

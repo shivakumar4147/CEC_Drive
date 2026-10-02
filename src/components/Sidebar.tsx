@@ -15,6 +15,7 @@ import {
   Moon,
   ShieldCheck,
   UploadCloud,
+  Trash2,
 } from 'lucide-react';
 import { SynapseLogo } from './SynapseLogo';
 import { ActiveNavKey, ThemeMode, FolderItem, UserRole, UserProfile } from '../types';
@@ -42,6 +43,7 @@ interface SidebarProps {
     important?: boolean;
     normal?: boolean;
   };
+  deletedCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -66,8 +68,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     important: false,
     normal: false,
   },
+  deletedCount = 0,
 }) => {
-  const [foldersExpanded, setFoldersExpanded] = useState(true);
+  const [foldersExpanded, setFoldersExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('cec_drive_root_folders_expanded');
+      if (saved !== null) return saved === 'true';
+    }
+    return false;
+  });
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('cec_drive_root_folders_expanded', String(foldersExpanded));
+    }
+  }, [foldersExpanded]);
   const [pinnedExpanded, setPinnedExpanded] = useState(true);
 
   // Auto-expand Root Folder category whenever active folder changes
@@ -77,8 +92,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [currentFolderId]);
 
-  // Top-level folders (parentId === null)
+  // Top-level folders (parentId === null) that are NOT soft-deleted
   const rootFolders = folders.filter((f) => {
+    const isDel = f.isDeleted || (f as any).is_deleted;
+    if (isDel) return false;
     const pId = f.parentId !== undefined ? f.parentId : (f as any).parent_id;
     return pId === null || pId === undefined;
   });
@@ -254,6 +271,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               collapsed={collapsed}
               onClick={() => onSelectNav('announcements')}
             />
+
+            {/* Admin-Only Recycle Bin (Trash System) */}
+            {currentUser.role === 'admin' && (
+              <NavItem
+                icon={<Trash2 className="w-4 h-4 text-rose-500" />}
+                label="Recycle Bin"
+                hasNotification={deletedCount > 0}
+                notificationColor="bg-rose-500"
+                active={activeNav === 'recycle-bin'}
+                collapsed={collapsed}
+                onClick={() => onSelectNav('recycle-bin')}
+              />
+            )}
           </div>
         </div>
 
@@ -400,6 +430,8 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
   level = 0,
 }) => {
   const subfolders = allFolders.filter((f) => {
+    const isDel = f.isDeleted || (f as any).is_deleted;
+    if (isDel) return false;
     const pId = f.parentId !== undefined ? f.parentId : (f as any).parent_id;
     return pId === folder.id;
   });
@@ -409,9 +441,26 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
     return isAncestorOfFolder(folder.id, currentFolderId, allFolders);
   }, [folder.id, currentFolderId, allFolders]);
 
-  const [expanded, setExpanded] = useState(level === 0 || isSelected || isChildSelected);
+  const [expanded, setExpanded] = useState(() => {
+    if (isSelected || isChildSelected) return true;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`cec_drive_folder_expanded_${folder.id}`);
+        if (saved !== null) return saved === 'true';
+      } catch (e) {}
+    }
+    return false; // Default closed
+  });
 
-  // Automatically drop down / expand when this folder or any of its subfolders is active
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`cec_drive_folder_expanded_${folder.id}`, String(expanded));
+      } catch (e) {}
+    }
+  }, [expanded, folder.id]);
+
+  // Automatically expand when this folder or subfolder becomes active
   React.useEffect(() => {
     if (isSelected || isChildSelected) {
       setExpanded(true);

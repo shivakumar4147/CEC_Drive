@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Pin, Folder as FolderIcon, ArrowRight, PinOff } from 'lucide-react';
 import { FolderItem, ViewMode } from '../types';
 import { SortField, SortOrder } from './DocumentTable';
@@ -15,6 +15,201 @@ interface PinnedFoldersViewProps {
   onTogglePinFolder: (folderId: string) => void;
   onToggleSelectFolder: (folderId: string, multiSelect: boolean) => void;
 }
+
+interface PinnedFolderItemProps {
+  folder: FolderItem;
+  isSelected: boolean;
+  hasActiveSelection: boolean;
+  onNavigateFolder: (folderId: string) => void;
+  onTogglePinFolder: (folderId: string) => void;
+  onToggleSelectFolder: (folderId: string, multiSelect: boolean) => void;
+  viewMode: ViewMode;
+}
+
+const PinnedFolderCard: React.FC<PinnedFolderItemProps> = ({
+  folder,
+  isSelected,
+  hasActiveSelection,
+  onNavigateFolder,
+  onTogglePinFolder,
+  onToggleSelectFolder,
+  viewMode,
+}) => {
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isLongPressTriggeredRef = useRef(false);
+
+  const handleTouchStart = () => {
+    const isMobile = window.innerWidth < 768;
+    if (!isMobile) return;
+
+    isLongPressTriggeredRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      isLongPressTriggeredRef.current = true;
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(40);
+        } catch (e) {
+          // ignore vibration restriction
+        }
+      }
+      onToggleSelectFolder(folder.id, true);
+    }, 500);
+  };
+
+  const handleTouchEndOrCancel = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    const isMobile = window.innerWidth < 768;
+
+    if (isMobile) {
+      if (isLongPressTriggeredRef.current) {
+        isLongPressTriggeredRef.current = false;
+        return;
+      }
+      if (hasActiveSelection || isSelected) {
+        onToggleSelectFolder(folder.id, true);
+      } else {
+        onNavigateFolder(folder.id);
+      }
+    } else {
+      // PC View: Click to select single, Ctrl + Click for multi-select
+      const isMulti = e.ctrlKey || e.metaKey;
+      onToggleSelectFolder(folder.id, isMulti);
+    }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    const isMobile = window.innerWidth < 768;
+    if (!isMobile) {
+      onNavigateFolder(folder.id);
+    }
+  };
+
+  if (viewMode === 'grid') {
+    return (
+      <div
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEndOrCancel}
+        onTouchMove={handleTouchEndOrCancel}
+        onTouchCancel={handleTouchEndOrCancel}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onNavigateFolder(folder.id);
+          } else if (e.key === ' ') {
+            e.preventDefault();
+            const isMulti = e.ctrlKey || e.metaKey;
+            onToggleSelectFolder(folder.id, isMulti);
+          }
+        }}
+        className={`p-4 rounded-xl border transition-all group flex flex-col justify-between cursor-pointer select-none ${
+          isSelected
+            ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-500 dark:border-amber-500/80 shadow-xs'
+            : 'bg-white dark:bg-neutral-900 border-neutral-200/80 dark:border-neutral-800 hover:border-amber-400 dark:hover:border-amber-500/60 shadow-2xs'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 group-hover:scale-105 transition-transform shrink-0">
+            <FolderIcon className="w-6 h-6 fill-amber-600/20" />
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePinFolder(folder.id);
+            }}
+            className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+            title="Unpin folder"
+          >
+            <PinOff className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="mt-4">
+          <h3 className="text-sm font-bold text-neutral-900 dark:text-white truncate group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+            {folder.name}
+          </h3>
+          <div className="flex items-center justify-between mt-1 text-[11px] font-mono text-neutral-400 dark:text-neutral-500">
+            <span>{folder.fileCount || 0} files</span>
+            <span>{folder.totalSize || '0 MB'}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // List view item
+  return (
+    <div
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEndOrCancel}
+      onTouchMove={handleTouchEndOrCancel}
+      onTouchCancel={handleTouchEndOrCancel}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onNavigateFolder(folder.id);
+        } else if (e.key === ' ') {
+          e.preventDefault();
+          const isMulti = e.ctrlKey || e.metaKey;
+          onToggleSelectFolder(folder.id, isMulti);
+        }
+      }}
+      className={`p-3.5 sm:px-4 flex items-center justify-between gap-3 transition-colors cursor-pointer select-none ${
+        isSelected ? 'bg-amber-50 dark:bg-amber-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
+      }`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 shrink-0">
+          <FolderIcon className="w-4 h-4 fill-amber-600/20" />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-xs font-semibold text-neutral-900 dark:text-white truncate">
+            {folder.name}
+          </h3>
+          <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+            {folder.fileCount || 0} files • {folder.totalSize || '0 MB'}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePinFolder(folder.id);
+          }}
+          className="p-1.5 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+          title="Unpin folder"
+        >
+          <PinOff className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigateFolder(folder.id);
+          }}
+          className="p-1 text-neutral-400 hover:text-amber-500"
+          title="Open folder"
+        >
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export const PinnedFoldersView: React.FC<PinnedFoldersViewProps> = ({
   pinnedFolderIds,
@@ -40,6 +235,8 @@ export const PinnedFoldersView: React.FC<PinnedFoldersViewProps> = ({
     return sortOrder === 'asc' ? comparison : -comparison;
   });
 
+  const hasActiveSelection = selectedFolderIds.length > 0;
+
   return (
     <div className="space-y-6 pb-10">
       {/* Quick Access Pinned Folders */}
@@ -63,102 +260,33 @@ export const PinnedFoldersView: React.FC<PinnedFoldersViewProps> = ({
           </div>
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
-            {pinnedFolders.map((folder) => {
-              const isSelected = selectedFolderIds.includes(folder.id);
-              return (
-                <div
-                  key={folder.id}
-                  onClick={(e) => {
-                    const isMulti = e.ctrlKey || e.metaKey;
-                    onToggleSelectFolder(folder.id, isMulti);
-                  }}
-                  onDoubleClick={() => onNavigateFolder(folder.id)}
-                  className={`p-4 rounded-xl border transition-all group flex flex-col justify-between cursor-pointer select-none ${
-                    isSelected
-                      ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-500 dark:border-amber-500/80 shadow-xs'
-                      : 'bg-white dark:bg-neutral-900 border-neutral-200/80 dark:border-neutral-800 hover:border-amber-400 dark:hover:border-amber-500/60 shadow-2xs'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 group-hover:scale-105 transition-transform shrink-0">
-                      <FolderIcon className="w-6 h-6 fill-amber-600/20" />
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onTogglePinFolder(folder.id);
-                      }}
-                      className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
-                      title="Unpin folder"
-                    >
-                      <PinOff className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="mt-4">
-                    <h3 className="text-sm font-bold text-neutral-900 dark:text-white truncate group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
-                      {folder.name}
-                    </h3>
-                    <div className="flex items-center justify-between mt-1 text-[11px] font-mono text-neutral-400 dark:text-neutral-500">
-                      <span>{folder.fileCount} files</span>
-                      <span>{folder.totalSize}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {pinnedFolders.map((folder) => (
+              <PinnedFolderCard
+                key={folder.id}
+                folder={folder}
+                isSelected={selectedFolderIds.includes(folder.id)}
+                hasActiveSelection={hasActiveSelection}
+                onNavigateFolder={onNavigateFolder}
+                onTogglePinFolder={onTogglePinFolder}
+                onToggleSelectFolder={onToggleSelectFolder}
+                viewMode={viewMode}
+              />
+            ))}
           </div>
         ) : (
           <div className="rounded-xl border border-neutral-200/80 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-2xs divide-y divide-neutral-100 dark:divide-neutral-800/80">
-            {pinnedFolders.map((folder) => {
-              const isSelected = selectedFolderIds.includes(folder.id);
-              return (
-                <div
-                  key={folder.id}
-                  onClick={(e) => {
-                    const isMulti = e.ctrlKey || e.metaKey;
-                    onToggleSelectFolder(folder.id, isMulti);
-                  }}
-                  onDoubleClick={() => onNavigateFolder(folder.id)}
-                  className={`p-3.5 sm:px-4 flex items-center justify-between gap-3 transition-colors cursor-pointer select-none ${
-                    isSelected
-                      ? 'bg-amber-50 dark:bg-amber-950/30'
-                      : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 shrink-0">
-                      <FolderIcon className="w-4 h-4 fill-amber-600/20" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-xs font-semibold text-neutral-900 dark:text-white truncate">
-                        {folder.name}
-                      </h3>
-                      <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
-                        {folder.fileCount} files • {folder.totalSize}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onTogglePinFolder(folder.id);
-                      }}
-                      className="p-1.5 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
-                      title="Unpin folder"
-                    >
-                      <PinOff className="w-3.5 h-3.5" />
-                    </button>
-                    <ArrowRight
-                      onClick={() => onNavigateFolder(folder.id)}
-                      className="w-4 h-4 text-neutral-400 hover:text-amber-500"
-                    />
-                  </div>
-                </div>
-              );
-            })}
+            {pinnedFolders.map((folder) => (
+              <PinnedFolderCard
+                key={folder.id}
+                folder={folder}
+                isSelected={selectedFolderIds.includes(folder.id)}
+                hasActiveSelection={hasActiveSelection}
+                onNavigateFolder={onNavigateFolder}
+                onTogglePinFolder={onTogglePinFolder}
+                onToggleSelectFolder={onToggleSelectFolder}
+                viewMode={viewMode}
+              />
+            ))}
           </div>
         )}
       </section>

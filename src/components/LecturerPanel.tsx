@@ -45,9 +45,9 @@ export const LecturerPanel: React.FC<LecturerPanelProps> = ({
   const [noticeBody, setNoticeBody] = useState('');
   const [noticePosted, setNoticePosted] = useState(false);
 
-  // Filter documents uploaded by lecturer or assigned to lecturer
+  // Filter documents uploaded by lecturer or assigned to lecturer (excluding deleted items)
   const myUploadedDocs = documents.filter(
-    (d) => d.author.name === currentLecturerName || d.author.name === 'Prof. Sharma'
+    (d) => !d.isDeleted && (d.author.name === currentLecturerName || d.author.name === 'Prof. Sharma')
   );
 
   const handleUploadSubmit = (e: React.FormEvent) => {

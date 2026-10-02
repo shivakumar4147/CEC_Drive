@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, Upload, Check, Folder } from 'lucide-react';
-import { DocumentItem, FolderItem } from '../types';
+import { X, Upload, Check, Folder, FileText, Loader2, CloudUpload } from 'lucide-react';
+import { UserProfile, DocumentItem, FolderItem } from '../types';
+import { uploadFileToCloudinary, saveDocumentWithCloudinary, checkUserUploadPermission } from '../lib/cloudinary';
 
 interface NewDocumentModalProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface NewDocumentModalProps {
   onAddDocument: (doc: DocumentItem) => void;
   folders?: FolderItem[];
   defaultFolderId?: string | null;
+  currentUserProfile?: UserProfile | null;
 }
 
 export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
@@ -16,25 +18,64 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
   onAddDocument,
   folders = [],
   defaultFolderId = null,
+  currentUserProfile,
 }) => {
+  const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
-  const [authorName, setAuthorName] = useState('Shiva Student');
+  const [authorName, setAuthorName] = useState(currentUserProfile?.name || 'Academic Staff');
   const [type, setType] = useState<DocumentItem['type']>('pdf');
   const [tag, setTag] = useState<'important' | 'normal'>('normal');
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(defaultFolderId);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selected = e.target.files[0];
+      setFile(selected);
+      if (!name.trim()) {
+        setName(selected.name);
+      }
+
+      const ext = selected.name.split('.').pop()?.toLowerCase() || '';
+      if (['pdf'].includes(ext)) setType('pdf');
+      else if (['doc', 'docx', 'txt', 'rtf'].includes(ext)) setType('doc');
+      else if (['xls', 'xlsx', 'csv'].includes(ext)) setType('sheet');
+      else if (['ppt', 'pptx'].includes(ext)) setType('presentation');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    const docId = `doc-${Date.now()}`;
+    setIsUploading(true);
+    setUploadError(null);
+
+    let cloudinaryResult = null;
+    if (file) {
+      try {
+        cloudinaryResult = await uploadFileToCloudinary(file, {
+          folderId: selectedFolderId,
+          docId: docId,
+          currentUserProfile: currentUserProfile,
+        });
+      } catch (err: any) {
+        setUploadError(err.message || 'Upload failed');
+        setIsUploading(false);
+        return;
+      }
+    }
 
     const initials = authorName
       .split(' ')
       .map((n) => n[0])
       .join('')
       .toUpperCase()
-      .slice(0, 1) || 'S';
+      .slice(0, 1) || 'A';
 
     const colors = [
       'bg-purple-600',
@@ -54,8 +95,12 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
       year: 'numeric',
     });
 
+    const calculatedSize = cloudinaryResult
+      ? `${(cloudinaryResult.bytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${(Math.random() * 8 + 1.2).toFixed(1)} MB`;
+
     const newDoc: DocumentItem = {
-      id: `doc-${Date.now()}`,
+      id: docId,
       name: name.trim(),
       dateAdded: dateFormatted,
       rawDate: now.toISOString(),
@@ -65,12 +110,23 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
         bgColor: randomColor,
       },
       folderId: selectedFolderId,
-      size: `${(Math.random() * 8 + 1.2).toFixed(1)} MB`,
+      uploadedBy: authorName,
+      size: calculatedSize,
       type,
       tag,
+      fileUrl: cloudinaryResult?.url,
+      cloudinaryPublicId: cloudinaryResult?.public_id,
+      resourceType: cloudinaryResult?.resource_type || 'raw',
+      mimeType: file?.type || 'application/pdf',
+      originalFilename: file?.name || name.trim(),
     };
 
+    // Save metadata to Supabase documents table
+    await saveDocumentWithCloudinary(newDoc);
+
     onAddDocument(newDoc);
+    setIsUploading(false);
+    setFile(null);
     setName('');
     onClose();
   };
@@ -88,17 +144,17 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
         <div className="flex items-center justify-between p-5 border-b border-neutral-100 dark:border-neutral-900">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600">
-              <Upload className="w-5 h-5" />
+              <CloudUpload className="w-5 h-5" />
             </div>
             <div>
               <h3
                 id="new-document-modal-title"
                 className="text-base font-semibold text-neutral-900 dark:text-white"
               >
-                Add New Document
+                Upload File
               </h3>
               <p className="text-xs text-neutral-400 dark:text-neutral-500">
-                Upload or create a document in this workspace
+                Upload academic material or notes to CEC Drive
               </p>
             </div>
           </div>
@@ -112,9 +168,48 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {uploadError && (
+            <div className="p-3 text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800">
+              {uploadError}
+            </div>
+          )}
+
+          {/* File Selector Dropzone */}
           <div>
             <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-              Document Name
+              Select Document File
+            </label>
+            <div className="relative border-2 border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl p-4 text-center hover:border-blue-500 transition-colors bg-neutral-50/50 dark:bg-neutral-900/40 cursor-pointer">
+              <input
+                type="file"
+                onChange={handleFileChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              {file ? (
+                <div className="flex items-center justify-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                  <FileText className="w-4 h-4 shrink-0" />
+                  <span className="truncate max-w-[220px]">{file.name}</span>
+                  <span className="text-[10px] text-neutral-400 font-mono">
+                    ({(file.size / (1024 * 1024)).toFixed(1)} MB)
+                  </span>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Upload className="w-5 h-5 text-neutral-400 mx-auto" />
+                  <p className="text-xs text-neutral-600 dark:text-neutral-400 font-medium">
+                    Click or drag file here to attach
+                  </p>
+                  <p className="text-[10px] text-neutral-400">
+                    PDF, DOC, XLSX, PPTX, or Image files
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
+              Document Display Title
             </label>
             <input
               type="text"
@@ -196,16 +291,27 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
             <button
               type="button"
               onClick={onClose}
+              disabled={isUploading}
               className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900 rounded-lg"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition-colors"
+              disabled={isUploading}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition-colors disabled:opacity-75"
             >
-              <Check className="w-4 h-4" />
-              <span>Create Document</span>
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Uploading to Cloudinary...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Upload & Save</span>
+                </>
+              )}
             </button>
           </div>
         </form>

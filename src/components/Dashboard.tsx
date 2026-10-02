@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   BookOpen,
   Download,
@@ -9,20 +9,36 @@ import {
   Sparkles,
   User,
   GraduationCap,
+  Activity,
+  UploadCloud,
+  Trash2,
+  Edit,
+  MoveRight,
 } from 'lucide-react';
 import { DocumentItem } from '../types';
+import { fetchRecentActivities, ActivityLogEntry } from '../lib/activity';
 
 interface DashboardProps {
   onSelectNav: (key: any) => void;
-  onPreviewDoc: (doc: DocumentItem) => void;
-  onDownloadDoc: (doc: DocumentItem) => void;
-  documents: DocumentItem[];
+  onPreviewDoc?: (doc: DocumentItem) => void;
+  onDownloadDoc?: (doc: DocumentItem) => void;
+  documents?: DocumentItem[];
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({
-  onSelectNav,
-}) => {
-  // Current Date context
+export const Dashboard: React.FC<DashboardProps> = ({ onSelectNav }) => {
+  const [activities, setActivities] = useState<ActivityLogEntry[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(true);
+
+  useEffect(() => {
+    async function loadActivities() {
+      setLoadingActivities(true);
+      const logData = await fetchRecentActivities(10);
+      setActivities(logData);
+      setLoadingActivities(false);
+    }
+    loadActivities();
+  }, []);
+
   const today = new Date();
   const dateFormatted = today.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -31,7 +47,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     year: 'numeric',
   });
 
-  // Subjects data
   const subjects = [
     {
       id: 'dbms',
@@ -80,9 +95,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
     },
   ];
 
+  const renderActionIcon = (action: string) => {
+    switch (action) {
+      case 'UPLOAD':
+        return <UploadCloud className="w-4 h-4 text-emerald-500" />;
+      case 'DOWNLOAD':
+        return <Download className="w-4 h-4 text-blue-500" />;
+      case 'DELETE':
+        return <Trash2 className="w-4 h-4 text-rose-500" />;
+      case 'MOVE':
+        return <MoveRight className="w-4 h-4 text-purple-500" />;
+      case 'RENAME':
+        return <Edit className="w-4 h-4 text-amber-500" />;
+      default:
+        return <Activity className="w-4 h-4 text-neutral-400" />;
+    }
+  };
+
   return (
     <div className="space-y-7 pb-10">
-      {/* 1. Welcome / Header Banner */}
+      {/* Welcome Banner */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white p-6 sm:p-8 shadow-lg">
         <div className="absolute -right-10 -bottom-10 opacity-10 pointer-events-none">
           <GraduationCap className="w-72 h-72" />
@@ -123,7 +155,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* 2. Quick Access Row */}
+      {/* Quick Access Row */}
       <section aria-label="Quick Access Shortcuts">
         <h2 className="text-xs font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">
           Quick Access
@@ -199,7 +231,64 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </section>
 
-      {/* 3. My Subjects Grid */}
+      {/* Real-time Activity Feed Section */}
+      <section aria-labelledby="activity-heading">
+        <div className="flex items-center justify-between mb-3.5">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <h2 id="activity-heading" className="text-base font-bold text-neutral-900 dark:text-white">
+              Recent System Activity
+            </h2>
+          </div>
+          <span className="text-xs text-neutral-400 dark:text-neutral-500 font-mono">
+            Live Supabase Logs
+          </span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 shadow-xs">
+          {loadingActivities ? (
+            <div className="py-6 text-center text-xs text-neutral-400 font-mono">
+              Loading recent activities...
+            </div>
+          ) : activities.length === 0 ? (
+            <div className="py-6 text-center text-xs text-neutral-400">
+              No activity logs recorded yet. Upload or download files to generate logs.
+            </div>
+          ) : (
+            <div className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
+              {activities.map((item, idx) => (
+                <div key={item.id || idx} className="py-3 flex items-center justify-between text-xs gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 shrink-0">
+                      {renderActionIcon(item.action)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-neutral-900 dark:text-white truncate">
+                        <span className="text-blue-600 dark:text-blue-400">{item.metadata?.userName || 'User'}</span>{' '}
+                        <span className="font-normal text-neutral-600 dark:text-neutral-300">
+                          {item.action.toLowerCase()}ed
+                        </span>{' '}
+                        <span className="font-semibold">{item.metadata?.fileName || item.metadata?.folderName || 'an item'}</span>
+                      </p>
+                      {item.metadata?.details && (
+                        <p className="text-[11px] text-neutral-400 dark:text-neutral-500 truncate mt-0.5">
+                          {item.metadata.details}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <span className="text-[11px] text-neutral-400 font-mono shrink-0">
+                    {item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* My Subjects Grid */}
       <section aria-labelledby="subjects-heading">
         <div className="flex items-center justify-between mb-3.5">
           <div className="flex items-center gap-2">

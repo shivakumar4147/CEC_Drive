@@ -8,6 +8,9 @@ import {
   FileText,
   Star,
   Folder,
+  ExternalLink,
+  FileCode,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { DocumentItem, FolderItem } from '../types';
 
@@ -33,6 +36,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   if (!isOpen || !document) return null;
 
   const currentFolder = folders.find((f) => f.id === document.folderId);
+  const fileUrl = document.fileUrl || (document as any).url;
+  const ext = (document.originalFilename || document.name).split('.').pop()?.toLowerCase() || '';
+
+  const isPdf = document.type === 'pdf' || ext === 'pdf';
+  const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext) || document.mimeType?.startsWith('image/');
 
   return (
     <div
@@ -41,16 +49,16 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       aria-modal="true"
       aria-labelledby="preview-modal-title"
     >
-      {/* Click outside backdrop */}
+      {/* Backdrop */}
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
       {/* Modal Card */}
-      <div className="relative w-full max-w-lg bg-white dark:bg-[#0a0a0a] rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden z-10 animate-in zoom-in-95 duration-150">
+      <div className="relative w-full max-w-2xl bg-white dark:bg-[#0a0a0a] rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden z-10 animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-neutral-100 dark:border-neutral-900">
+        <div className="flex items-center justify-between p-5 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600">
-              <FileText className="w-5 h-5" />
+            <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600">
+              {isImage ? <ImageIcon className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
             </div>
             <div>
               <h3
@@ -60,7 +68,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 {document.name}
               </h3>
               <p className="text-xs text-neutral-400 dark:text-neutral-500 font-mono uppercase">
-                {document.type} format • {document.size}
+                {ext ? `.${ext}` : document.type} • {document.size}
               </p>
             </div>
           </div>
@@ -74,20 +82,106 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           </button>
         </div>
 
-        {/* Body content */}
-        <div className="p-6 space-y-5">
-          {/* Metadata Grid */}
-          <div className="grid grid-cols-2 gap-3 p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-100 dark:border-neutral-800/60 text-xs">
+        {/* Body Content */}
+        <div className="p-6 overflow-y-auto space-y-5">
+          {/* Format-Specific Display */}
+          {fileUrl && isPdf ? (
+            /* PDF Browser View */
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                  PDF Preview
+                </span>
+                <a
+                  href={fileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                >
+                  <span>Open PDF in new tab</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+              <iframe
+                src={fileUrl}
+                title={`PDF preview of ${document.name}`}
+                className="w-full h-80 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900"
+              />
+            </div>
+          ) : fileUrl && isImage ? (
+            /* Image Direct Viewer */
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                Image Preview
+              </span>
+              <div className="p-2 rounded-xl bg-neutral-900/5 dark:bg-black/60 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center min-h-[220px]">
+                <img
+                  src={fileUrl}
+                  alt={document.name}
+                  className="max-h-80 max-w-full object-contain rounded-lg"
+                />
+              </div>
+            </div>
+          ) : (
+            /* File Information Card for DOCX/XLSX/PPTX/ZIP */
+            <div className="p-5 rounded-2xl bg-neutral-50 dark:bg-neutral-900/60 border border-neutral-200/80 dark:border-neutral-800 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  <FileCode className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-neutral-900 dark:text-white">
+                    File Information
+                  </h4>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Preview not rendered inline for .{ext || 'document'} files. Click Download to open locally.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 text-xs">
+                <div className="p-3 rounded-xl bg-white dark:bg-[#121212] border border-neutral-100 dark:border-neutral-800">
+                  <span className="block text-[11px] text-neutral-400 uppercase font-semibold">
+                    Filename
+                  </span>
+                  <span className="font-medium text-neutral-900 dark:text-white truncate block mt-0.5">
+                    {document.originalFilename || document.name}
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-white dark:bg-[#121212] border border-neutral-100 dark:border-neutral-800">
+                  <span className="block text-[11px] text-neutral-400 uppercase font-semibold">
+                    Type
+                  </span>
+                  <span className="font-mono text-neutral-900 dark:text-white block mt-0.5 uppercase">
+                    {ext || document.type}
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-white dark:bg-[#121212] border border-neutral-100 dark:border-neutral-800">
+                  <span className="block text-[11px] text-neutral-400 uppercase font-semibold">
+                    Size
+                  </span>
+                  <span className="font-mono text-neutral-900 dark:text-white block mt-0.5">
+                    {document.size}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Document Metadata Details */}
+          <div className="grid grid-cols-2 gap-3 p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-100 dark:border-neutral-800 text-xs">
             <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
-              <User className="w-4 h-4 text-neutral-400" />
-              <span>Author:</span>
+              <User className="w-4 h-4 text-neutral-400 shrink-0" />
+              <span>Uploaded By:</span>
               <span className="font-medium text-neutral-900 dark:text-white truncate">
                 {document.author.name}
               </span>
             </div>
 
             <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
-              <Calendar className="w-4 h-4 text-neutral-400" />
+              <Calendar className="w-4 h-4 text-neutral-400 shrink-0" />
               <span>Added:</span>
               <span className="font-medium text-neutral-900 dark:text-white truncate">
                 {document.dateAdded}
@@ -95,16 +189,16 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
-              <HardDrive className="w-4 h-4 text-neutral-400" />
-              <span>Size:</span>
-              <span className="font-mono text-neutral-900 dark:text-white">
-                {document.size}
+              <HardDrive className="w-4 h-4 text-neutral-400 shrink-0" />
+              <span>File Reference ID:</span>
+              <span className="font-mono text-neutral-900 dark:text-white truncate">
+                {document.id}
               </span>
             </div>
 
             <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
               <span
-                className={`w-2 h-2 rounded-full ${
+                className={`w-2 h-2 rounded-full shrink-0 ${
                   document.tag === 'important' ? 'bg-rose-500' : 'bg-amber-500'
                 }`}
               />
@@ -115,7 +209,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             </div>
           </div>
 
-          {/* Folder Location Selector */}
+          {/* Folder Directory Selector */}
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
               Folder Directory Location
@@ -130,7 +224,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     onMoveDocToFolder(document.id, target);
                   }
                 }}
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Root / Unassigned</option>
                 {folders.map((f) => (
@@ -146,26 +240,10 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               </p>
             )}
           </div>
-
-          {/* Document Abstract / Excerpt */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-2">
-              Document Abstract
-            </h4>
-            <div className="p-4 rounded-xl bg-white dark:bg-[#121212] border border-neutral-100 dark:border-neutral-800 text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed space-y-2">
-              <p>
-                Academic resource and course deliverables for {document.name}.
-                Uploaded to CEC Drive for student reference and exam preparation.
-              </p>
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">
-                Uploaded by {document.author.name} • Verified academic asset.
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between p-4 border-t border-neutral-100 dark:border-neutral-900 bg-neutral-50/50 dark:bg-black">
+        <div className="flex items-center justify-between p-4 border-t border-neutral-100 dark:border-neutral-900 bg-neutral-50/50 dark:bg-black shrink-0">
           <button
             onClick={() => onToggleStar && onToggleStar(document.id)}
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white rounded-lg transition-colors"
@@ -187,10 +265,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             >
               Close
             </button>
+
             {onDownload && (
               <button
                 onClick={() => onDownload(document)}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition-colors"
+                className="flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-xs transition-colors"
               >
                 <Download className="w-4 h-4" />
                 <span>Download</span>

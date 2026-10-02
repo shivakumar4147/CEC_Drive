@@ -13,6 +13,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { LandingPage } from './components/LandingPage';
+import { SynapseLogo } from './components/SynapseLogo';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { Inbox } from './components/Inbox';
@@ -29,9 +30,13 @@ import { FolderToolbar } from './components/FolderToolbar';
 import { DocumentTable, SortField, SortOrder } from './components/DocumentTable';
 import { DocumentGrid } from './components/DocumentGrid';
 import { supabase } from './lib/supabase';
+import { handleSecureFileDownload } from './lib/cloudinary';
+import { logActivity } from './lib/activity';
 import { BatchActionBar } from './components/BatchActionBar';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { NewDocumentModal } from './components/NewDocumentModal';
+import { RecycleBinView } from './components/RecycleBinView';
+import { ResetPasswordModal } from './components/ResetPasswordModal';
 import {
   DocumentItem,
   FolderItem,
@@ -242,6 +247,17 @@ export default function App() {
   // Users & Role State
   const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
   const [currentRole, setCurrentRole] = useState<UserRole>('student');
+  const [activeUserProfile, setActiveUserProfile] = useState<UserProfile | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('cec_drive_active_user_profile');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return null;
+  });
 
   // Landing page / authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -252,59 +268,122 @@ export default function App() {
     return false;
   });
 
+  // Reset Password Modal State
+  const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
+
+  // Butter-Smooth Glitch Protection Splash Loading State
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [fadeSplashOut, setFadeSplashOut] = useState(false);
+
+  const dismissSplash = () => {
+    setFadeSplashOut(true);
+    setTimeout(() => setIsInitialLoading(false), 300);
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(dismissSplash, 350);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Check URL on mount for password recovery tokens
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      const search = window.location.search;
+      if (hash.includes('type=recovery') || search.includes('type=recovery')) {
+        setIsResetPasswordModalOpen(true);
+        if (window.history.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      }
+    }
+  }, []);
+
   // Supabase Auth Listener
   useEffect(() => {
+    const syncUserProfile = async (user: any) => {
+      setIsAuthenticated(true);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('cec_drive_authenticated', 'true');
+      }
+      const meta = user.user_metadata || {};
+      
+      let effectiveRole: UserRole = (meta.role as UserRole) || 'student';
+      let dbName = meta.name;
+
+      try {
+        const { data: dbProfile } = await supabase
+          .from('profiles')
+          .select('role, name, department, section')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (dbProfile) {
+          if (dbProfile.role) effectiveRole = dbProfile.role as UserRole;
+          if (dbProfile.name) dbName = dbProfile.name;
+        }
+      } catch (e) {
+        console.warn('Failed to fetch role/profile from profiles table:', e);
+      }
+
+      setCurrentRole(effectiveRole);
+
+      const profile: UserProfile = {
+        id: user.id,
+        email: user.email || '',
+        name: dbName || (user.email ? user.email.split('@')[0] : 'User'),
+        role: effectiveRole,
+        department: meta.department || 'CSE',
+        section: meta.section || 'Sec A',
+        initial: ((dbName || user.email || 'U')[0]).toUpperCase(),
+        bgColor: effectiveRole === 'admin' ? 'bg-purple-600' : effectiveRole === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
+      };
+      setActiveUserProfile(profile);
+
+      // Load user's pinned folders EXCLUSIVELY from user_folder_pins table in Supabase
+      try {
+        const { data: pinsData } = await supabase
+          .from('user_folder_pins')
+          .select('folder_id')
+          .eq('user_id', user.id);
+
+        if (pinsData) {
+          setPinnedFolderIds(pinsData.map((p: any) => p.folder_id));
+        } else {
+          setPinnedFolderIds([]);
+        }
+      } catch (e) {
+        setPinnedFolderIds([]);
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('cec_drive_active_user_profile', JSON.stringify(profile));
+      }
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        setIsAuthenticated(true);
-        const meta = session.user.user_metadata;
-        if (meta?.role) {
-          setCurrentRole(meta.role);
-          setUsers((prev) =>
-            prev.map((u) =>
-              u.role === meta.role
-                ? {
-                    ...u,
-                    name: meta.name || u.name,
-                    department: meta.department || u.department,
-                  }
-                : u
-            )
-          );
-        }
+        syncUserProfile(session.user);
       }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsResetPasswordModalOpen(true);
+        if (typeof window !== 'undefined' && window.history.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      }
       if (session?.user) {
-        setIsAuthenticated(true);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('cec_drive_authenticated', 'true');
-        }
-        const meta = session.user.user_metadata || {};
-        if (meta?.role) {
-          setCurrentRole(meta.role);
-        }
-
-        // Auto-sync active session to public.profiles table
-        try {
-          const minimalProfile = {
-            id: session.user.id,
-            email: session.user.email,
-            name: meta.name || 'User',
-            role: meta.role || 'student',
-            usn: meta.usn || null,
-          };
-          await supabase.from('profiles').upsert(minimalProfile, { onConflict: 'id' });
-        } catch (e) {
-          console.warn('Session profile sync error:', e);
-        }
+        syncUserProfile(session.user);
       } else if (event === 'SIGNED_OUT') {
         setIsAuthenticated(false);
+        setActiveUserProfile(null);
         if (typeof window !== 'undefined') {
           localStorage.setItem('cec_drive_authenticated', 'false');
+          localStorage.removeItem('cec_drive_active_user_profile');
         }
       }
     });
@@ -312,14 +391,44 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleLoginSuccess = (role?: UserRole, userDetails?: Partial<UserProfile>) => {
+  const handleResetPasswordSuccess = async () => {
+    setIsResetPasswordModalOpen(false);
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (e) {
+      // ignore
+    }
+    setIsAuthenticated(false);
+    setActiveUserProfile(null);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('cec_drive_authenticated', 'false');
+      localStorage.removeItem('cec_drive_active_user_profile');
+      if (window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    }
+    showToast('Password updated successfully! Please sign in with your new password.');
+  };
+
+  const handleLoginSuccess = (role?: UserRole, userDetails?: Partial<UserProfile> & { id?: string }) => {
     if (role) {
       setCurrentRole(role);
     }
-    if (userDetails && role) {
-      setUsers((prev) =>
-        prev.map((u) => (u.role === role ? { ...u, ...userDetails } : u))
-      );
+    if (userDetails) {
+      const profile: UserProfile = {
+        id: userDetails.id || `usr-${Date.now()}`,
+        email: userDetails.email || '',
+        name: userDetails.name || 'User',
+        role: role || userDetails.role || 'student',
+        department: userDetails.department || 'CSE',
+        section: userDetails.section || 'Sec A',
+        initial: (userDetails.initial || (userDetails.name || 'U')[0]).toUpperCase(),
+        bgColor: userDetails.bgColor || (role === 'student' ? 'bg-blue-600' : 'bg-amber-600'),
+      };
+      setActiveUserProfile(profile);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('cec_drive_active_user_profile', JSON.stringify(profile));
+      }
     }
     setIsAuthenticated(true);
     if (typeof window !== 'undefined') {
@@ -329,20 +438,24 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      // Scope sign-out strictly to the local device browser session (does not invalidate PC session)
+      await supabase.auth.signOut({ scope: 'local' });
     } catch (err) {
       console.error('Supabase sign out error:', err);
     }
     setIsAuthenticated(false);
+    setActiveUserProfile(null);
     if (typeof window !== 'undefined') {
       localStorage.setItem('cec_drive_authenticated', 'false');
+      localStorage.removeItem('cec_drive_active_user_profile');
     }
   };
 
   const currentUser = useMemo(() => {
+    if (activeUserProfile) return activeUserProfile;
     const found = users.find((u) => u.role === currentRole);
     return found || users[0];
-  }, [users, currentRole]);
+  }, [activeUserProfile, users, currentRole]);
 
   // Active navigation & Explorer location state with localStorage persistence across reloads
   const [activeNav, setActiveNav] = useState<ActiveNavKey>(() => {
@@ -377,74 +490,115 @@ export default function App() {
     }
   }, [currentFolderId]);
 
-  // User & Role Scoped Pinned Folders (Root folders remain shared, pinned folders are per-user)
-  const getUserPinStorageKey = (role: UserRole, userId: string) =>
-    `cec_drive_pinned_folders_${role}_${userId || 'default'}`;
-
-  const getRoleDefaultPins = (role: UserRole): string[] => {
-    if (role === 'student') return ['sec-cse-a', 'folder-dbms'];
-    if (role === 'uploader') return ['dept-cse', 'folder-cn'];
-    return ['dept-cse', 'dept-ise'];
+  // User-Isolated Pinned Folders (Strictly private per logged-in user email/id)
+  const getUserPinStorageKey = (userObj?: UserProfile | null) => {
+    if (!userObj || (!userObj.id && !userObj.email)) return null;
+    const identifier = (userObj.email || userObj.id).replace(/[^a-zA-Z0-9]/g, '_');
+    return `cec_drive_pinned_folders_v2_${identifier}`;
   };
 
-  const [pinnedFolderIds, setPinnedFolderIds] = useState<string[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const key = getUserPinStorageKey(currentRole, currentUser?.id || 'student');
-        const saved = localStorage.getItem(key);
-        if (saved) return JSON.parse(saved);
-      } catch (e) {
-        // fallback
-      }
-    }
-    return getRoleDefaultPins(currentRole);
-  });
+  const [pinnedFolderIds, setPinnedFolderIds] = useState<string[]>([]);
 
-  // Sync pinned folders when active user role or identity changes
+  // Load user pins directly from Supabase user_folder_pins table as soon as user ID is resolved
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    const fetchPinsForUser = async () => {
+      if (!activeUserProfile?.id) return;
       try {
-        const key = getUserPinStorageKey(currentRole, currentUser?.id || 'default');
-        const saved = localStorage.getItem(key);
-        if (saved) {
-          setPinnedFolderIds(JSON.parse(saved));
-        } else {
-          setPinnedFolderIds(getRoleDefaultPins(currentRole));
+        console.log('[SUPABASE PIN FETCH] Querying user_folder_pins for user_id:', activeUserProfile.id);
+        const { data: pins, error } = await supabase
+          .from('user_folder_pins')
+          .select('folder_id, created_at')
+          .eq('user_id', activeUserProfile.id)
+          .order('created_at', { ascending: false });
+
+        console.log('[SUPABASE PIN FETCH] Rows:', pins, 'Error:', error);
+        if (!error && pins) {
+          setPinnedFolderIds(pins.map((p: any) => p.folder_id));
         }
       } catch (e) {
-        setPinnedFolderIds(getRoleDefaultPins(currentRole));
+        console.error('[SUPABASE PIN FETCH EXCEPTION]:', e);
       }
-    }
-  }, [currentRole, currentUser?.id]);
+    };
 
-  // Persist pinned folder updates for current user role
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const key = getUserPinStorageKey(currentRole, currentUser?.id || 'default');
-        localStorage.setItem(key, JSON.stringify(pinnedFolderIds));
-      } catch (e) {
-        // ignore
+    fetchPinsForUser();
+  }, [activeUserProfile?.id]);
+
+  const handleTogglePinFolder = async (folderId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id || activeUserProfile?.id;
+
+      if (!userId) {
+        showToast('Please sign in to pin folders');
+        return;
       }
-    }
-  }, [pinnedFolderIds, currentRole, currentUser?.id]);
 
-  const handleTogglePinFolder = (folderId: string) => {
-    setPinnedFolderIds((prev) => {
-      const exists = prev.includes(folderId);
-      const updated = exists ? prev.filter((id) => id !== folderId) : [...prev, folderId];
+      const isCurrentlyPinned = pinnedFolderIds.includes(folderId);
       const folderName = folders.find((f) => f.id === folderId)?.name || 'Folder';
-      showToast(exists ? `Unpinned "${folderName}"` : `Pinned "${folderName}" to Quick Access`);
-      return updated;
-    });
+
+      // Immediate UI update
+      const updatedPins = isCurrentlyPinned
+        ? pinnedFolderIds.filter((id) => id !== folderId)
+        : [...pinnedFolderIds, folderId];
+      setPinnedFolderIds(updatedPins);
+      showToast(isCurrentlyPinned ? `Unpinned "${folderName}"` : `Pinned "${folderName}" to Quick Access`);
+
+      if (isCurrentlyPinned) {
+        // Delete pin specifically for this user and folder
+        const { error } = await supabase
+          .from('user_folder_pins')
+          .delete()
+          .eq('user_id', userId)
+          .eq('folder_id', folderId);
+        if (error) console.error('Supabase unpin error:', error.message);
+      } else {
+        // Insert pin for this user and folder
+        const { error } = await supabase
+          .from('user_folder_pins')
+          .upsert([{ user_id: userId, folder_id: folderId }], { onConflict: 'user_id,folder_id' });
+        if (error) console.error('Supabase pin insert error:', error.message);
+      }
+    } catch (e) {
+      console.error('Failed to toggle pin in Supabase:', e);
+    }
   };
 
   // View mode: 'list' or 'grid' (grid is default)
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
 
-  // Data states
-  const [folders, setFolders] = useState<FolderItem[]>(INITIAL_FOLDERS);
-  const [documents, setDocuments] = useState<DocumentItem[]>(INITIAL_DOCUMENTS);
+  // Data states with localStorage persistence for soft-deleted items
+  const [folders, setFolders] = useState<FolderItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('cec_drive_folders');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return INITIAL_FOLDERS;
+  });
+
+  const [documents, setDocuments] = useState<DocumentItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('cec_drive_documents');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return INITIAL_DOCUMENTS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cec_drive_folders', JSON.stringify(folders));
+    } catch (e) {}
+  }, [folders]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cec_drive_documents', JSON.stringify(documents));
+    } catch (e) {}
+  }, [documents]);
+
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
 
@@ -506,17 +660,17 @@ export default function App() {
       setCurrentFolderId(null);
     }
     if (key === 'calendar') {
-      setNotifications((prev) => ({ ...prev, calendar: false }));
+      setNotifications((prev: Record<string, boolean>) => ({ ...prev, calendar: false }));
     } else if (key === 'pinned-folders') {
-      setNotifications((prev) => ({ ...prev, pinned: false }));
+      setNotifications((prev: Record<string, boolean>) => ({ ...prev, pinned: false }));
     } else if (key === 'recent-files') {
-      setNotifications((prev) => ({ ...prev, recent: false }));
+      setNotifications((prev: Record<string, boolean>) => ({ ...prev, recent: false }));
     } else if (key === 'announcements') {
-      setNotifications((prev) => ({ ...prev, announcements: false }));
+      setNotifications((prev: Record<string, boolean>) => ({ ...prev, announcements: false }));
     } else if (key === 'documents') {
-      setNotifications((prev) => ({ ...prev, folders: false }));
+      setNotifications((prev: Record<string, boolean>) => ({ ...prev, folders: false }));
     } else if (key === 'dashboard' || key === 'admin-panel' || key === 'lecturer-panel') {
-      setNotifications((prev) => ({ ...prev, dashboard: false }));
+      setNotifications((prev: Record<string, boolean>) => ({ ...prev, dashboard: false }));
     }
   };
 
@@ -541,8 +695,26 @@ export default function App() {
             type: d.type || 'pdf',
             tag: d.tag || 'normal',
             starred: d.starred || false,
+            isDeleted: d.is_deleted || d.isDeleted || false,
+            deletedAt: d.deleted_at || d.deletedAt || undefined,
+            deletedBy: d.deleted_by || d.deletedBy || undefined,
           }));
           setDocuments(normalizedDocs);
+        }
+
+        // 1. Ensure initial folder structure exists in Supabase to support foreign key constraints
+        try {
+          const initialFolderPayloads = INITIAL_FOLDERS.map((f) => ({
+            id: f.id,
+            name: f.name,
+            parent_id: f.parentId || null,
+            file_count: f.fileCount || 0,
+            total_size: f.totalSize || '0 MB',
+            is_deleted: false,
+          }));
+          await supabase.from('folders').upsert(initialFolderPayloads, { onConflict: 'id' });
+        } catch (seedErr) {
+          console.warn('Initial folder seeding warning:', seedErr);
         }
 
         const { data: remoteFolders, error: folderErr } = await supabase.from('folders').select('*');
@@ -553,15 +725,215 @@ export default function App() {
             parentId: f.parentId !== undefined ? f.parentId : (f.parent_id !== undefined ? f.parent_id : null),
             fileCount: f.fileCount ?? f.file_count ?? 0,
             totalSize: f.totalSize ?? f.total_size ?? '0 MB',
+            isDeleted: f.is_deleted || f.isDeleted || false,
+            deletedAt: f.deleted_at || f.deletedAt || undefined,
+            deletedBy: f.deleted_by || f.deletedBy || undefined,
           }));
-          setFolders(normalizedFolders);
+          setFolders((prevLocal) => {
+            const remoteIds = new Set(normalizedFolders.map((nf) => nf.id));
+            const localOnlyFolders = prevLocal.filter((lf) => !remoteIds.has(lf.id));
+            return [...normalizedFolders, ...localOnlyFolders];
+          });
+        }
+
+        const { data: remoteProfiles } = await supabase.from('profiles').select('*');
+        if (remoteProfiles && remoteProfiles.length > 0) {
+          const loadedUsers: UserProfile[] = remoteProfiles.map((p: any) => ({
+            id: p.id,
+            email: p.email || '',
+            name: p.name || (p.email ? p.email.split('@')[0] : 'User'),
+            role: (p.role as UserRole) || 'student',
+            department: p.department || 'CSE',
+            section: p.section || 'Sec A',
+            initial: ((p.name || p.email || 'U')[0]).toUpperCase(),
+            bgColor: p.role === 'admin' ? 'bg-purple-600' : p.role === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
+          }));
+          setUsers(loadedUsers);
+
+          // Real-time cross-device sync: Sync active user's pinned_folders directly from user_folder_pins table
+          if (activeUserProfile?.id) {
+            const { data: userPins } = await supabase
+              .from('user_folder_pins')
+              .select('folder_id')
+              .eq('user_id', activeUserProfile.id);
+
+            if (userPins) {
+              setPinnedFolderIds(userPins.map((p: any) => p.folder_id));
+            } else {
+              const activeProfile = remoteProfiles.find(
+                (p: any) => p.id === activeUserProfile.id || (p.email && p.email.toLowerCase() === activeUserProfile.email.toLowerCase())
+              );
+              if (activeProfile && Array.isArray(activeProfile.pinned_folders)) {
+                setPinnedFolderIds(activeProfile.pinned_folders);
+              }
+            }
+          }
         }
       } catch (err) {
         console.log('Supabase sync notice: using initial dataset');
       }
     }
+
     fetchSupabaseData();
-  }, []);
+
+    // Auto-refresh Supabase data when switching back to tab (PC <-> Mobile sync)
+    const handleFocus = () => {
+      fetchSupabaseData();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleFocus);
+
+    // Supabase Realtime Subscription: Direct In-Memory Payload Patching for 0ms Instant Cross-Device Sync
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_folder_pins' }, (payload: any) => {
+        console.log('[REALTIME PIN PAYLOAD]', payload);
+        if (payload.eventType === 'INSERT' && payload.new) {
+          const newPin = payload.new;
+          if (activeUserProfile?.id && newPin.user_id === activeUserProfile.id) {
+            setPinnedFolderIds((prev) => (prev.includes(newPin.folder_id) ? prev : [...prev, newPin.folder_id]));
+          }
+        } else if (payload.eventType === 'DELETE') {
+          console.log('[REALTIME UNPIN PAYLOAD]', payload);
+          const deletedFolderId = payload.old?.folder_id;
+          if (deletedFolderId) {
+            setPinnedFolderIds((prev) => prev.filter((id) => id !== deletedFolderId));
+          }
+          // Always execute immediate targeted pin sync for active user on DELETE
+          if (activeUserProfile?.id) {
+            supabase
+              .from('user_folder_pins')
+              .select('folder_id')
+              .eq('user_id', activeUserProfile.id)
+              .then(({ data, error }) => {
+                if (!error && data) {
+                  console.log('[REALTIME UNPIN SYNC RESULT]', data);
+                  setPinnedFolderIds(data.map((p: any) => p.folder_id));
+                }
+              });
+          }
+        } else {
+          fetchSupabaseData();
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'folders' }, (payload: any) => {
+        if (payload.eventType === 'INSERT' && payload.new) {
+          const newF = payload.new;
+          setFolders((prev) => {
+            if (prev.some((f) => f.id === newF.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: newF.id,
+                name: newF.name,
+                parentId: newF.parent_id || null,
+                fileCount: newF.file_count || 0,
+                totalSize: newF.total_size || '0 MB',
+                isDeleted: !!newF.is_deleted,
+                deletedAt: newF.deleted_at,
+                deletedBy: newF.deleted_by,
+                createdBy: newF.created_by,
+              },
+            ];
+          });
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          const updF = payload.new;
+          setFolders((prev) =>
+            prev.map((f) =>
+              f.id === updF.id
+                ? {
+                    ...f,
+                    name: updF.name,
+                    parentId: updF.parent_id || null,
+                    fileCount: updF.file_count ?? f.fileCount,
+                    totalSize: updF.total_size ?? f.totalSize,
+                    isDeleted: !!updF.is_deleted,
+                    deletedAt: updF.deleted_at,
+                    deletedBy: updF.deleted_by,
+                  }
+                : f
+            )
+          );
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          setFolders((prev) => prev.filter((f) => f.id !== payload.old.id));
+        } else {
+          fetchSupabaseData();
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, (payload: any) => {
+        if (payload.eventType === 'INSERT' && payload.new) {
+          const newD = payload.new;
+          setDocuments((prev) => {
+            if (prev.some((d) => d.id === newD.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: newD.id,
+                name: newD.name,
+                dateAdded: newD.date_added || 'Just now',
+                rawDate: newD.raw_date || new Date().toISOString(),
+                author: {
+                  name: newD.author_name || 'User',
+                  initial: newD.author_initial || 'U',
+                  bgColor: newD.author_bg_color || 'bg-blue-600',
+                },
+                folderId: newD.folder_id || null,
+                size: newD.size || '0 KB',
+                type: newD.type || 'pdf',
+                tag: newD.tag || 'normal',
+                starred: !!newD.starred,
+                isDeleted: !!newD.is_deleted,
+                deletedAt: newD.deleted_at,
+                deletedBy: newD.deleted_by,
+                url: newD.url || newD.file_url,
+                cloudinaryPublicId: newD.cloudinary_public_id,
+              },
+            ];
+          });
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          const updD = payload.new;
+          setDocuments((prev) =>
+            prev.map((d) =>
+              d.id === updD.id
+                ? {
+                    ...d,
+                    name: updD.name,
+                    folderId: updD.folder_id || null,
+                    starred: !!updD.starred,
+                    isDeleted: !!updD.is_deleted,
+                    deletedAt: updD.deleted_at,
+                    deletedBy: updD.deleted_by,
+                  }
+                : d
+            )
+          );
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          setDocuments((prev) => prev.filter((d) => d.id !== payload.old.id));
+        } else {
+          fetchSupabaseData();
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity' }, () => {
+        fetchSupabaseData();
+      })
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('visibilitychange', handleFocus);
+      supabase.removeChannel(channel);
+    };
+  }, [activeUserProfile?.id, activeUserProfile?.email]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -582,11 +954,31 @@ export default function App() {
   };
 
   // User Management Handlers for Admin
-  const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
+  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
     setUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+      prev.map((u) => (u.id === userId ? { ...u, role: newRole, bgColor: newRole === 'admin' ? 'bg-purple-600' : newRole === 'uploader' ? 'bg-amber-600' : 'bg-blue-600' } : u))
     );
-    showToast('User role updated');
+
+    if (activeUserProfile && activeUserProfile.id === userId) {
+      setCurrentRole(newRole);
+      const updatedProfile = {
+        ...activeUserProfile,
+        role: newRole,
+        bgColor: newRole === 'admin' ? 'bg-purple-600' : newRole === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
+      };
+      setActiveUserProfile(updatedProfile);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('cec_drive_active_user_profile', JSON.stringify(updatedProfile));
+      }
+    }
+
+    showToast(`Updated user role to ${newRole.toUpperCase()}`);
+
+    try {
+      await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+    } catch (e) {
+      console.warn('Failed to persist user role in Supabase:', e);
+    }
   };
 
   const handleAddUser = (newUser: Omit<UserProfile, 'id'>) => {
@@ -661,9 +1053,13 @@ export default function App() {
     return [...crumbs, ...pathStack];
   }, [currentFolderId, folders]);
 
-  // Active Subfolders (Filtered by search & sorted)
+  // Soft-deleted item memos for Admin Recycle Bin
+  const deletedFolders = useMemo(() => computedFolders.filter((f) => f.isDeleted), [computedFolders]);
+  const deletedDocuments = useMemo(() => documents.filter((d) => d.isDeleted), [documents]);
+
+  // Active Subfolders (Filtered by search & sorted, excluding soft-deleted items)
   const activeSubfolders = useMemo(() => {
-    let list = [...computedFolders];
+    let list = computedFolders.filter((f) => !f.isDeleted);
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -688,9 +1084,9 @@ export default function App() {
     });
   }, [computedFolders, currentFolderId, searchQuery, sortField, sortOrder]);
 
-  // Documents in current active directory location or filtered view
+  // Documents in current active directory location or filtered view (Excludes soft-deleted items)
   const filteredAndSortedDocuments = useMemo(() => {
-    let result = [...documents];
+    let result = documents.filter((d) => !d.isDeleted);
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -726,6 +1122,26 @@ export default function App() {
     });
   }, [documents, activeNav, currentFolderId, searchQuery, sortField, sortOrder]);
 
+  // Folder-Based Permission Check: Student -> Read-Only; Lecturer -> Authorized Folders; Admin -> Full Access
+  const canUserModifyFolder = useMemo(() => {
+    const role = currentUser?.role || currentRole;
+    if (role === 'student') return false;
+    if (role === 'admin') return true;
+    if (role === 'uploader' || role === 'lecturer') {
+      if (!currentFolderId) return true;
+      const currentFolder = folders.find((f) => f.id === currentFolderId);
+      if (!currentFolder) return true;
+      const userDept = (currentUser?.department || 'CSE').toLowerCase();
+      const folderNameLower = (currentFolder.name || '').toLowerCase();
+      const folderIdLower = (currentFolder.id || '').toLowerCase();
+      if ((folderIdLower.includes('ece') || folderNameLower.includes('ece')) && userDept !== 'ece') return false;
+      if ((folderIdLower.includes('me') || folderNameLower.includes('me')) && userDept !== 'me') return false;
+      if ((folderIdLower.includes('aids') || folderNameLower.includes('ai & ds')) && !userDept.includes('ai')) return false;
+      return true;
+    }
+    return false;
+  }, [currentUser, currentRole, currentFolderId, folders]);
+
   // Folder Explorer Logic Actions
   const handleCreateFolder = async (name: string, parentId: string | null) => {
     const newFolder: FolderItem = {
@@ -738,30 +1154,72 @@ export default function App() {
     setFolders((prev) => [...prev, newFolder]);
     showToast(`Created folder "${name}"`);
 
-    // Sync to Supabase
+    // Sync to Supabase with schema fallbacks
     try {
-      await supabase.from('folders').insert([newFolder]);
+      const fullFolderPayload: any = {
+        id: newFolder.id,
+        name: newFolder.name,
+        parent_id: parentId || null,
+        file_count: 0,
+        total_size: '0 MB',
+        is_deleted: false,
+      };
+      const { error: fullErr } = await supabase.from('folders').upsert([fullFolderPayload], { onConflict: 'id' });
+      if (fullErr) {
+        console.warn('Full folder insert warning, trying minimal payload:', fullErr.message);
+        const minimalFolderPayload: any = {
+          id: newFolder.id,
+          name: newFolder.name,
+          parent_id: parentId || null,
+        };
+        const { error: minErr } = await supabase.from('folders').upsert([minimalFolderPayload], { onConflict: 'id' });
+        if (minErr) {
+          console.error('Minimal folder insert error:', minErr.message);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to sync new folder to Supabase:', e);
+    }
+  };
+
+  const handleRenameFolder = async (folderId: string, newName: string) => {
+    setFolders((prev) =>
+      prev.map((f) => (f.id === folderId ? { ...f, name: newName } : f))
+    );
+    showToast(`Renamed folder to "${newName}"`);
+
+    try {
+      await supabase.from('folders').update({ name: newName }).eq('id', folderId);
     } catch (e) {
       // ignore offline fallback
     }
   };
 
-  const handleRenameFolder = (folderId: string, newName: string) => {
-    setFolders((prev) =>
-      prev.map((f) => (f.id === folderId ? { ...f, name: newName } : f))
-    );
-    showToast(`Renamed folder to "${newName}"`);
-  };
-
-  const handleDeleteFolder = (folderId: string) => {
+  const handleDeleteFolder = async (folderId: string, skipConfirm = false) => {
     const folderToDelete = folders.find((f) => f.id === folderId);
-    const idsToRemove = [folderId, ...getAllSubfolderIds(folderId, folders)];
-    setFolders((prev) => prev.filter((f) => !idsToRemove.includes(f.id)));
-    setDocuments((prev) =>
-      prev.map((d) => (d.folderId && idsToRemove.includes(d.folderId) ? { ...d, folderId: null } : d))
+    if (!folderToDelete) return;
+    if (!skipConfirm && !confirm(`Are you sure you want to delete folder "${folderToDelete.name}"? It will be moved to the Admin Recycle Bin.`)) {
+      return;
+    }
+    const idsToSoftDelete = [folderId, ...getAllSubfolderIds(folderId, folders)];
+    const now = new Date().toISOString();
+    const userName = currentUser.name || currentUser.email || 'User';
+
+    setFolders((prev) =>
+      prev.map((f) => (idsToSoftDelete.includes(f.id) ? { ...f, isDeleted: true, deletedAt: now, deletedBy: userName } : f))
     );
-    setSelectedFolderIds((prev) => prev.filter((id) => !idsToRemove.includes(id)));
-    showToast(`Deleted folder "${folderToDelete?.name || 'Folder'}"`);
+    setDocuments((prev) =>
+      prev.map((d) => (d.folderId && idsToSoftDelete.includes(d.folderId) ? { ...d, isDeleted: true, deletedAt: now, deletedBy: userName } : d))
+    );
+    setSelectedFolderIds((prev) => prev.filter((id) => !idsToSoftDelete.includes(id)));
+    showToast(`Moved folder "${folderToDelete.name}" to Recycle Bin`);
+
+    try {
+      await supabase.from('folders').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('id', idsToSoftDelete);
+      await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('folder_id', idsToSoftDelete);
+    } catch (e) {
+      // ignore offline fallback
+    }
   };
 
   const handleMoveDocToFolder = (docId: string, targetFolderId: string | null) => {
@@ -921,23 +1379,10 @@ export default function App() {
 
   const handleDownloadDoc = async (doc: DocumentItem) => {
     showToast(`Downloading "${doc.name}"...`);
-    const docUrl = (doc as any).url || (doc as any).fileUrl;
-    if (docUrl) {
-      try {
-        const res = await fetch(docUrl);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = doc.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        return;
-      } catch (e) {
-        console.error('Fetch download failed:', e);
-      }
+    const downloadRes = await handleSecureFileDownload(doc, activeUserProfile || currentUser);
+    if (downloadRes.success) {
+      showToast(`Started download for "${doc.name}"`);
+      return;
     }
     // Fallback file generation with appropriate extension matching file type
     let extension = '.pdf';
@@ -965,11 +1410,109 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleDeleteDoc = (id: string) => {
+  const handleDeleteDoc = async (id: string, skipConfirm = false) => {
     const docToDelete = documents.find((d) => d.id === id);
-    setDocuments((prev) => prev.filter((d) => d.id !== id));
+    if (!docToDelete) return;
+    if (!skipConfirm && !confirm(`Are you sure you want to delete file "${docToDelete.name}"? It will be moved to the Admin Recycle Bin.`)) {
+      return;
+    }
+    const now = new Date().toISOString();
+    const userName = currentUser.name || currentUser.email || 'User';
+
+    setDocuments((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, isDeleted: true, deletedAt: now, deletedBy: userName } : d))
+    );
     setSelectedDocIds((prev) => prev.filter((item) => item !== id));
-    showToast(`Moved "${docToDelete?.name || 'File'}" to trash`);
+    showToast(`Moved "${docToDelete.name}" to Recycle Bin`);
+
+    try {
+      await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
+    } catch (e) {
+      // ignore offline fallback
+    }
+
+    logActivity({
+      userId: currentUser.id || null,
+      userName,
+      action: 'DELETE',
+      fileId: id,
+      fileName: docToDelete.name,
+      details: `Soft-deleted "${docToDelete.name}" to Recycle Bin`,
+    });
+  };
+
+  // Restore and Permanent Purge Handlers for Admin Recycle Bin
+  const handleRestoreDoc = async (docId: string) => {
+    const doc = documents.find((d) => d.id === docId);
+    setDocuments((prev) =>
+      prev.map((d) => (d.id === docId ? { ...d, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : d))
+    );
+    showToast(`Restored file "${doc?.name || 'File'}"`);
+    try {
+      await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
+    } catch (e) {}
+  };
+
+  const handleRestoreFolder = async (folderId: string) => {
+    const folder = folders.find((f) => f.id === folderId);
+    const idsToRestore = [folderId, ...getAllSubfolderIds(folderId, folders)];
+    setFolders((prev) =>
+      prev.map((f) => (idsToRestore.includes(f.id) ? { ...f, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : f))
+    );
+    setDocuments((prev) =>
+      prev.map((d) => (d.folderId && idsToRestore.includes(d.folderId) ? { ...d, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : d))
+    );
+    showToast(`Restored folder "${folder?.name || 'Folder'}"`);
+    try {
+      await supabase.from('folders').update({ is_deleted: false, deleted_at: null, deleted_by: null }).in('id', idsToRestore);
+      await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).in('folder_id', idsToRestore);
+    } catch (e) {}
+  };
+
+  const handlePermanentDeleteDoc = async (docId: string) => {
+    const doc = documents.find((d) => d.id === docId);
+    if (!confirm(`Are you sure you want to PERMANENTLY delete file "${doc?.name || 'File'}"? This action cannot be undone.`)) {
+      return;
+    }
+    setDocuments((prev) => prev.filter((d) => d.id !== docId));
+    showToast(`Permanently deleted "${doc?.name || 'File'}"`);
+    try {
+      await supabase.from('documents').delete().eq('id', docId);
+    } catch (e) {}
+  };
+
+  const handlePermanentDeleteFolder = async (folderId: string) => {
+    const folder = folders.find((f) => f.id === folderId);
+    if (!confirm(`Are you sure you want to PERMANENTLY delete folder "${folder?.name || 'Folder'}" and all its contents? This action cannot be undone.`)) {
+      return;
+    }
+    const idsToPurge = [folderId, ...getAllSubfolderIds(folderId, folders)];
+    setFolders((prev) => prev.filter((f) => !idsToPurge.includes(f.id)));
+    setDocuments((prev) => prev.filter((d) => !d.folderId || !idsToPurge.includes(d.folderId)));
+    showToast(`Permanently deleted folder "${folder?.name || 'Folder'}"`);
+    try {
+      await supabase.from('folders').delete().in('id', idsToPurge);
+      await supabase.from('documents').delete().in('folder_id', idsToPurge);
+    } catch (e) {}
+  };
+
+  const handleEmptyRecycleBin = async () => {
+    const totalCount = deletedDocuments.length + deletedFolders.length;
+    if (totalCount === 0) return;
+    if (!confirm(`Are you sure you want to PERMANENTLY delete ALL ${totalCount} items in the Recycle Bin? This action cannot be undone.`)) {
+      return;
+    }
+    const docIds = deletedDocuments.map((d) => d.id);
+    const folderIds = deletedFolders.map((f) => f.id);
+
+    setDocuments((prev) => prev.filter((d) => !d.isDeleted));
+    setFolders((prev) => prev.filter((f) => !f.isDeleted));
+    showToast(`Emptied Recycle Bin (Purged ${totalCount} items)`);
+
+    try {
+      if (docIds.length > 0) await supabase.from('documents').delete().in('id', docIds);
+      if (folderIds.length > 0) await supabase.from('folders').delete().in('id', folderIds);
+    } catch (e) {}
   };
 
   const handleDownloadSelected = async () => {
@@ -1032,11 +1575,31 @@ export default function App() {
     }
   };
 
-  const handleDeleteSelected = () => {
-    const count = selectedDocIds.length;
-    setDocuments((prev) => prev.filter((d) => !selectedDocIds.includes(d.id)));
-    setSelectedDocIds([]);
-    showToast(`Deleted ${count} documents`);
+  const handleDeleteSelected = async () => {
+    if (selectedFolderIds.length > 0) {
+      const count = selectedFolderIds.length;
+      if (!confirm(`Are you sure you want to delete ${count} selected folder(s)? They will be moved to the Admin Recycle Bin.`)) {
+        return;
+      }
+      const idsToDelete = [...selectedFolderIds];
+      for (const id of idsToDelete) {
+        await handleDeleteFolder(id, true);
+      }
+      setSelectedFolderIds([]);
+      return;
+    }
+
+    if (selectedDocIds.length > 0) {
+      const count = selectedDocIds.length;
+      if (!confirm(`Are you sure you want to delete ${count} selected file(s)? They will be moved to the Admin Recycle Bin.`)) {
+        return;
+      }
+      const idsToDelete = [...selectedDocIds];
+      for (const id of idsToDelete) {
+        await handleDeleteDoc(id, true);
+      }
+      setSelectedDocIds([]);
+    }
   };
 
   const handleAddDocument = async (newDoc: DocumentItem) => {
@@ -1088,6 +1651,7 @@ export default function App() {
           currentFolderId={currentFolderId}
           onNavigateFolder={setCurrentFolderId}
           notifications={notifications}
+          deletedCount={deletedDocuments.length + deletedFolders.length}
         />
       </div>
 
@@ -1127,9 +1691,10 @@ export default function App() {
             currentFolderId={currentFolderId}
             onNavigateFolder={(id) => {
               setCurrentFolderId(id);
-              setNotifications((prev) => ({ ...prev, folders: false }));
+              setNotifications((prev: Record<string, boolean>) => ({ ...prev, folders: false }));
             }}
             notifications={notifications}
+            deletedCount={deletedDocuments.length + deletedFolders.length}
           />
         </div>
       </div>
@@ -1227,7 +1792,7 @@ export default function App() {
               <span className="hidden xs:inline font-semibold">Log Out</span>
             </button>
 
-            {(currentUser.role === 'admin' || currentUser.role === 'uploader') && (
+            {canUserModifyFolder && (
               <button
                 onClick={() => setIsNewDocModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer shrink-0"
@@ -1307,12 +1872,13 @@ export default function App() {
                 onMoveSelectedDocs={handleMoveSelectedDocsToFolder}
                 onDownloadSelectedFolders={handleDownloadSelectedFolders}
                 onDownloadSelected={handleDownloadSelected}
+                onDeleteSelected={handleDeleteSelected}
                 onTogglePinFolder={handleTogglePinFolder}
                 onViewModeChange={setViewMode}
                 onSortFieldChange={setSortField}
                 onSortOrderChange={setSortOrder}
                 onSearchChange={setSearchQuery}
-                canModify={currentUser.role === 'admin' || currentUser.role === 'uploader'}
+                canModify={canUserModifyFolder}
               />
               <PinnedFoldersView
                 pinnedFolderIds={pinnedFolderIds}
@@ -1346,6 +1912,17 @@ export default function App() {
             />
           ) : activeNav === 'my-tasks' ? (
             <MyTasks onSelectNav={setActiveNav} />
+          ) : activeNav === 'recycle-bin' ? (
+            <RecycleBinView
+              deletedFolders={deletedFolders}
+              deletedDocuments={deletedDocuments}
+              allFolders={computedFolders}
+              onRestoreFolder={handleRestoreFolder}
+              onRestoreDoc={handleRestoreDoc}
+              onPermanentDeleteFolder={handlePermanentDeleteFolder}
+              onPermanentDeleteDoc={handlePermanentDeleteDoc}
+              onEmptyRecycleBin={handleEmptyRecycleBin}
+            />
           ) : (
             <>
               {/* File Explorer Path & Command Bar */}
@@ -1368,12 +1945,13 @@ export default function App() {
                 onMoveSelectedDocs={handleMoveSelectedDocsToFolder}
                 onDownloadSelectedFolders={handleDownloadSelectedFolders}
                 onDownloadSelected={handleDownloadSelected}
+                onDeleteSelected={handleDeleteSelected}
                 onTogglePinFolder={handleTogglePinFolder}
                 onViewModeChange={setViewMode}
                 onSortFieldChange={setSortField}
                 onSortOrderChange={setSortOrder}
                 onSearchChange={setSearchQuery}
-                canModify={currentUser.role === 'admin' || currentUser.role === 'uploader'}
+                canModify={canUserModifyFolder}
               />
 
               {/* Title Header */}
@@ -1443,7 +2021,7 @@ export default function App() {
                         }
                       }}
                       onDeleteFolder={handleDeleteFolder}
-                      canModify={currentUser.role === 'admin' || currentUser.role === 'uploader'}
+                      canModify={canUserModifyFolder}
                     />
                   )}
                 </section>
@@ -1485,7 +2063,7 @@ export default function App() {
                     sortOrder={sortOrder}
                     onSortChange={handleSortChange}
                     onDownload={handleDownloadDoc}
-                    onDelete={currentUser.role === 'admin' || currentUser.role === 'uploader' ? handleDeleteDoc : undefined}
+                    onDelete={canUserModifyFolder ? handleDeleteDoc : undefined}
                   />
                 ) : (
                   <DocumentGrid
@@ -1495,7 +2073,7 @@ export default function App() {
                     onToggleSelect={handleToggleSelectDoc}
                     onDocumentClick={(doc) => setPreviewDoc(doc)}
                     onDownload={handleDownloadDoc}
-                    onDelete={currentUser.role === 'admin' || currentUser.role === 'uploader' ? handleDeleteDoc : undefined}
+                    onDelete={canUserModifyFolder ? handleDeleteDoc : undefined}
                   />
                 )}
               </section>
@@ -1524,7 +2102,7 @@ export default function App() {
               }
             : handleDeleteSelected
         }
-        canDelete={currentUser.role === 'admin' || currentUser.role === 'uploader'}
+        canDelete={canUserModifyFolder}
       />
 
       {/* Document Detail Preview Modal */}
@@ -1545,6 +2123,14 @@ export default function App() {
         onAddDocument={handleAddDocument}
         folders={computedFolders}
         defaultFolderId={currentFolderId}
+        currentUserProfile={activeUserProfile || currentUser}
+      />
+
+      {/* Set New Password Modal (Password Recovery Flow) */}
+      <ResetPasswordModal
+        isOpen={isResetPasswordModalOpen}
+        onClose={() => setIsResetPasswordModalOpen(false)}
+        onSuccess={handleResetPasswordSuccess}
       />
 
       {/* Toast Notification Pill */}
@@ -1556,6 +2142,34 @@ export default function App() {
         >
           <Sparkles className="w-3.5 h-3.5 text-blue-400" />
           <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Glitch-Protection Butter-Smooth Splash Loading Overlay */}
+      {isInitialLoading && (
+        <div
+          className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-white dark:bg-neutral-950 transition-opacity duration-300 ease-out ${
+            fadeSplashOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+        >
+          <div className="relative flex flex-col items-center gap-4">
+            <div className="relative w-16 h-16 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 blur-xl opacity-30 animate-pulse" />
+              <div className="relative w-14 h-14 bg-neutral-900 border border-neutral-800 rounded-2xl flex items-center justify-center shadow-2xl">
+                <SynapseLogo showText={false} />
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <span className="text-lg font-black tracking-tight text-neutral-900 dark:text-white">
+                CEC Drive
+              </span>
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

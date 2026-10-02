@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS public.documents (
     type TEXT NOT NULL CHECK (type IN ('pdf', 'doc', 'sheet', 'spec', 'presentation')),
     tag TEXT DEFAULT 'normal' CHECK (tag IN ('important', 'normal')),
     starred BOOLEAN DEFAULT FALSE,
+    file_url TEXT,
+    cloudinary_public_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -123,17 +125,35 @@ CREATE TABLE IF NOT EXISTS public.announcements (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 6. FILES TABLE (Detailed Cloudinary Storage Metadata & Uploader Tracking)
+CREATE TABLE IF NOT EXISTS public.files (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    folder_id TEXT REFERENCES public.folders(id) ON DELETE SET NULL,
+    uploaded_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    cloudinary_public_id TEXT NOT NULL,
+    cloudinary_url TEXT NOT NULL,
+    resource_type TEXT DEFAULT 'raw',
+    mime_type TEXT DEFAULT 'application/pdf',
+    file_size TEXT NOT NULL,
+    original_filename TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Enable Row Level Security (RLS) & Public Read/Write Access Policies
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.folders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.files ENABLE ROW LEVEL SECURITY;
 
 -- Allow anonymous & authenticated users full read/write for CEC Drive demonstration
 CREATE POLICY "Public profiles policy" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public folders policy" ON public.folders FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public documents policy" ON public.documents FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public announcements policy" ON public.announcements FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Public files policy" ON public.files FOR ALL USING (true) WITH CHECK (true);
 
 -- ==========================================
 -- SEED DATA (INITIAL ACADEMIC DIRECTORY & NOTES)
