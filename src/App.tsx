@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { LandingPage } from './components/LandingPage';
 import { SynapseLogo } from './components/SynapseLogo';
+import { CECDriveLoader } from './components/CECDriveLoader';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { Inbox } from './components/Inbox';
@@ -2148,28 +2149,11 @@ export default function App() {
       {/* Glitch-Protection Butter-Smooth Splash Loading Overlay */}
       {isInitialLoading && (
         <div
-          className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-white dark:bg-neutral-950 transition-opacity duration-300 ease-out ${
+          className={`fixed inset-0 z-[9999] flex items-center justify-center bg-white dark:bg-neutral-950 transition-opacity duration-300 ease-out ${
             fadeSplashOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
           }`}
         >
-          <div className="relative flex flex-col items-center gap-4">
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 blur-xl opacity-30 animate-pulse" />
-              <div className="relative w-14 h-14 bg-neutral-900 border border-neutral-800 rounded-2xl flex items-center justify-center shadow-2xl">
-                <SynapseLogo showText={false} />
-              </div>
-            </div>
-            <div className="flex flex-col items-center gap-2">
-              <span className="text-lg font-black tracking-tight text-neutral-900 dark:text-white">
-                CEC Drive
-              </span>
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
-          </div>
+          <CECDriveLoader />
         </div>
       )}
     </div>
