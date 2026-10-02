@@ -16,6 +16,9 @@ import { LandingPage } from './components/LandingPage';
 import { SynapseLogo } from './components/SynapseLogo';
 import { CECDriveLoader } from './components/CECDriveLoader';
 import { Sidebar } from './components/Sidebar';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { HeaderAccountMenu } from './components/HeaderAccountMenu';
+import { ProfileView } from './components/ProfileView';
 import { Dashboard } from './components/Dashboard';
 import { Inbox } from './components/Inbox';
 import { MyTasks } from './components/MyTasks';
@@ -101,6 +104,8 @@ const INITIAL_FOLDERS: FolderItem[] = [
   { id: 'folder-web', name: 'Web Technology', parentId: 'sec-cse-a', fileCount: 0, totalSize: '0 MB' },
 ];
 
+import { SAMPLE_PDF_DATA_URL } from './utils/samplePdf';
+
 // Initial Student Academic Documents linked to folder hierarchy
 const INITIAL_DOCUMENTS: DocumentItem[] = [
   {
@@ -118,6 +123,7 @@ const INITIAL_DOCUMENTS: DocumentItem[] = [
     type: 'pdf',
     tag: 'important',
     starred: true,
+    fileUrl: SAMPLE_PDF_DATA_URL,
   },
   {
     id: 'doc-2',
@@ -133,6 +139,7 @@ const INITIAL_DOCUMENTS: DocumentItem[] = [
     size: '1.9 MB',
     type: 'pdf',
     tag: 'important',
+    fileUrl: SAMPLE_PDF_DATA_URL,
   },
   {
     id: 'doc-3',
@@ -213,6 +220,25 @@ const INITIAL_USERS: UserProfile[] = [
     bgColor: 'bg-purple-600',
   },
 ];
+
+export function deduplicateDocuments(docs: DocumentItem[]): DocumentItem[] {
+  const seenIds = new Set<string>();
+  const seenKeys = new Set<string>();
+  const result: DocumentItem[] = [];
+
+  for (const d of docs) {
+    if (!d || !d.id) continue;
+    const nameKey = `${d.folderId || 'root'}::${(d.name || '').trim().toLowerCase()}`;
+    if (seenIds.has(d.id) || seenKeys.has(nameKey)) {
+      continue;
+    }
+    seenIds.add(d.id);
+    seenKeys.add(nameKey);
+    result.push(d);
+  }
+
+  return result;
+}
 
 export default function App() {
   // Theme state
@@ -582,10 +608,10 @@ export default function App() {
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('cec_drive_documents');
-        if (saved) return JSON.parse(saved);
+        if (saved) return deduplicateDocuments(JSON.parse(saved));
       } catch (e) {}
     }
-    return INITIAL_DOCUMENTS;
+    return deduplicateDocuments(INITIAL_DOCUMENTS);
   });
 
   useEffect(() => {
@@ -696,11 +722,15 @@ export default function App() {
             type: d.type || 'pdf',
             tag: d.tag || 'normal',
             starred: d.starred || false,
+            fileUrl: d.fileUrl || d.file_url || d.cloudinary_url || d.url || undefined,
+            cloudinaryPublicId: d.cloudinaryPublicId || d.cloudinary_public_id || undefined,
+            mimeType: d.mimeType || d.mime_type || undefined,
+            originalFilename: d.originalFilename || d.original_filename || undefined,
             isDeleted: d.is_deleted || d.isDeleted || false,
             deletedAt: d.deleted_at || d.deletedAt || undefined,
             deletedBy: d.deleted_by || d.deletedBy || undefined,
           }));
-          setDocuments(normalizedDocs);
+          setDocuments(deduplicateDocuments(normalizedDocs));
         }
 
         // 1. Ensure initial folder structure exists in Supabase to support foreign key constraints
@@ -1604,7 +1634,7 @@ export default function App() {
   };
 
   const handleAddDocument = async (newDoc: DocumentItem) => {
-    setDocuments((prev) => [newDoc, ...prev]);
+    setDocuments((prev) => deduplicateDocuments([newDoc, ...prev]));
     showToast(`Document "${newDoc.name}" published`);
 
     // Sync to Supabase
@@ -1784,15 +1814,6 @@ export default function App() {
               )}
             </div>
 
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-neutral-600 dark:text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold border border-neutral-200 dark:border-neutral-800 transition-colors cursor-pointer shrink-0"
-              title="Log Out to Landing Page"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden xs:inline font-semibold">Log Out</span>
-            </button>
-
             {canUserModifyFolder && (
               <button
                 onClick={() => setIsNewDocModalOpen(true)}
@@ -1802,15 +1823,31 @@ export default function App() {
                 <span className="hidden xs:inline font-semibold">New File</span>
               </button>
             )}
+
+            {/* Top-Right User Account Avatar Menu */}
+            <HeaderAccountMenu
+              user={activeUserProfile || currentUser}
+              userRole={currentUser.role}
+              onLogout={handleLogout}
+              onOpenSettings={() => setActiveNav('profile' as any)}
+              onOpenProfile={() => setActiveNav('profile' as any)}
+            />
           </div>
         </header>
 
         {/* Scrollable Main Content Container */}
         <div
           onClick={handleBackgroundClick}
-          className="flex-1 overflow-y-auto px-4 sm:px-6 md:px-8 py-5 sm:py-7 space-y-6 sm:space-y-8"
+          className="flex-1 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 pb-24 sm:py-7 space-y-6 sm:space-y-8"
         >
-          {activeNav === 'admin-panel' ? (
+          {(activeNav as string) === 'profile' ? (
+            <ProfileView
+              user={activeUserProfile || currentUser}
+              userRole={currentUser.role}
+              onLogout={handleLogout}
+              onOpenResetPassword={() => setIsResetPasswordModalOpen(true)}
+            />
+          ) : activeNav === 'admin-panel' ? (
             <AdminPanel
               users={users}
               folders={folders}
@@ -2115,6 +2152,7 @@ export default function App() {
         onToggleStar={handleToggleStar}
         folders={computedFolders}
         onMoveDocToFolder={handleMoveDocToFolder}
+        userRole={currentUser?.role}
       />
 
       {/* Create / Upload New Document Modal */}
@@ -2132,6 +2170,13 @@ export default function App() {
         isOpen={isResetPasswordModalOpen}
         onClose={() => setIsResetPasswordModalOpen(false)}
         onSuccess={handleResetPasswordSuccess}
+      />
+
+      {/* Mobile Bottom Navigation Bar */}
+      <MobileBottomNav
+        activeNav={activeNav}
+        userRole={currentUser.role}
+        onSelectNav={(key) => handleSelectNav(key as any)}
       />
 
       {/* Toast Notification Pill */}

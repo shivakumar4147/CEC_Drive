@@ -217,30 +217,30 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
                   <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => onDocumentClick(doc)}
-                      className="p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded hover:bg-neutral-200/50 dark:hover:bg-neutral-800"
+                      className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded-lg hover:bg-neutral-200/50 dark:hover:bg-neutral-800 transition-colors"
                       title="Preview"
                       aria-label="Preview document"
                     >
-                      <Eye className="w-3.5 h-3.5" />
+                      <Eye className="w-3.5 h-3.5 shrink-0" />
                     </button>
                     {onDownload && (
                       <button
                         onClick={() => onDownload(doc)}
-                        className="p-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded hover:bg-neutral-200/50 dark:hover:bg-neutral-800"
+                        className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded-lg hover:bg-neutral-200/50 dark:hover:bg-neutral-800 transition-colors"
                         title="Download"
                         aria-label="Download document"
                       >
-                        <Download className="w-3.5 h-3.5" />
+                        <Download className="w-3.5 h-3.5 shrink-0" />
                       </button>
                     )}
                     {onDelete && (
                       <button
                         onClick={() => onDelete(doc.id)}
-                        className="p-1 text-neutral-400 hover:text-rose-600 rounded hover:bg-neutral-200/50 dark:hover:bg-neutral-800"
+                        className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-neutral-800 transition-colors"
                         title="Delete"
                         aria-label="Delete document"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3.5 h-3.5 shrink-0" />
                       </button>
                     )}
                   </div>

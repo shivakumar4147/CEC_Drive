@@ -126,10 +126,10 @@ const PinnedFolderCard: React.FC<PinnedFolderItemProps> = ({
               e.stopPropagation();
               onTogglePinFolder(folder.id);
             }}
-            className="p-1 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+            className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
             title="Unpin folder"
           >
-            <PinOff className="w-4 h-4" />
+            <PinOff className="w-4 h-4 shrink-0" />
           </button>
         </div>
 
@@ -185,26 +185,26 @@ const PinnedFolderCard: React.FC<PinnedFolderItemProps> = ({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 shrink-0">
         <button
           onClick={(e) => {
             e.stopPropagation();
             onTogglePinFolder(folder.id);
           }}
-          className="p-1.5 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+          className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
           title="Unpin folder"
         >
-          <PinOff className="w-3.5 h-3.5" />
+          <PinOff className="w-3.5 h-3.5 shrink-0" />
         </button>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onNavigateFolder(folder.id);
           }}
-          className="p-1 text-neutral-400 hover:text-amber-500"
+          className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-amber-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg transition-colors"
           title="Open folder"
         >
-          <ArrowRight className="w-4 h-4" />
+          <ArrowRight className="w-4 h-4 shrink-0" />
         </button>
       </div>
     </div>

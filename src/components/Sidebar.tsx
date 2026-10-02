@@ -182,8 +182,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         className="flex-1 px-0 py-2 space-y-3 overflow-y-auto overflow-x-hidden focus:outline-none scrollbar-none"
         tabIndex={-1}
       >
-        {/* Role-Based Dashboard */}
-        <div className="px-0">
+        {/* Role-Based Dashboard (Hidden on mobile when bottom nav is present) */}
+        <div className="px-0 hidden md:block">
           <div className="space-y-0.5">
             <NavItem
               icon={dashboardConfig.icon}
@@ -196,83 +196,86 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <div className={`h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 ${collapsed ? 'mx-2' : 'mx-5'}`} />
+        <div className={`hidden md:block h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 ${collapsed ? 'mx-2' : 'mx-5'}`} />
 
         {/* Core Navigation Items */}
         <div className="px-0">
           <div className="space-y-0.5">
-            <NavItem
-              icon={<Calendar className="w-4 h-4 text-indigo-500" />}
-              label="Calendar"
-              hasNotification={notifications.calendar}
-              notificationColor="bg-rose-500"
-              active={activeNav === 'calendar'}
-              collapsed={collapsed}
-              onClick={() => onSelectNav('calendar')}
-            />
-
-            <div>
-              <CollapsibleHeader
-                icon={<Pin className="w-4 h-4 text-amber-500 fill-amber-500/20" />}
-                label="Pinned Folder"
-                count={pinnedFolderIds.length}
-                expanded={pinnedExpanded}
+            {/* Hidden on mobile when bottom nav bar is present */}
+            <div className="hidden md:block space-y-0.5">
+              <NavItem
+                icon={<Calendar className="w-4 h-4 text-indigo-500" />}
+                label="Calendar"
+                hasNotification={notifications.calendar}
+                notificationColor="bg-rose-500"
+                active={activeNav === 'calendar'}
                 collapsed={collapsed}
-                onToggle={() => setPinnedExpanded(!pinnedExpanded)}
-                onClickLabel={() => onSelectNav('pinned-folders')}
-                active={activeNav === 'pinned-folders'}
+                onClick={() => onSelectNav('calendar')}
               />
 
-              {/* Sub-list of quick access pinned folders in sidebar */}
-              {!collapsed && pinnedExpanded && pinnedFolderIds.length > 0 && (
-                <div className="ml-7 my-1 space-y-0.5 border-l border-neutral-200 dark:border-neutral-800 pl-2">
-                  {pinnedFolderIds.slice(0, 10).map((id) => {
-                    const f = folders.find((item) => item.id === id);
-                    if (!f) return null;
-                    const isFolderActive = activeNav === 'documents' && currentFolderId === f.id;
-                    return (
-                      <button
-                        key={f.id}
-                        onClick={() => handleSelectSidebarFolder(f.id)}
-                        className={`w-full flex items-center justify-between gap-2 px-2 py-1 text-xs rounded-md truncate transition-colors text-left ${
-                          isFolderActive
-                            ? 'font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40'
-                            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
-                        }`}
-                        title={f.name}
-                      >
-                        <div className="flex items-center gap-2 truncate min-w-0">
-                          <FolderIcon className="w-3 h-3 text-amber-500 shrink-0" />
-                          <span className="truncate">{f.name}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              <div>
+                <CollapsibleHeader
+                  icon={<Pin className="w-4 h-4 text-amber-500 fill-amber-500/20" />}
+                  label="Pinned Folder"
+                  count={pinnedFolderIds.length}
+                  expanded={pinnedExpanded}
+                  collapsed={collapsed}
+                  onToggle={() => setPinnedExpanded(!pinnedExpanded)}
+                  onClickLabel={() => onSelectNav('pinned-folders')}
+                  active={activeNav === 'pinned-folders'}
+                />
+
+                {/* Sub-list of quick access pinned folders in sidebar */}
+                {!collapsed && pinnedExpanded && pinnedFolderIds.length > 0 && (
+                  <div className="ml-7 my-1 space-y-0.5 border-l border-neutral-200 dark:border-neutral-800 pl-2">
+                    {pinnedFolderIds.slice(0, 10).map((id) => {
+                      const f = folders.find((item) => item.id === id);
+                      if (!f) return null;
+                      const isFolderActive = activeNav === 'documents' && currentFolderId === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() => handleSelectSidebarFolder(f.id)}
+                          className={`w-full flex items-center justify-between gap-2 px-2 py-1 text-xs rounded-md truncate transition-colors text-left ${
+                            isFolderActive
+                              ? 'font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40'
+                              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                          }`}
+                          title={f.name}
+                        >
+                          <div className="flex items-center gap-2 truncate min-w-0">
+                            <FolderIcon className="w-3 h-3 text-amber-500 shrink-0" />
+                            <span className="truncate">{f.name}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <NavItem
+                icon={<Clock className="w-4 h-4 text-emerald-500" />}
+                label="Recent Files"
+                hasNotification={notifications.recent}
+                notificationColor="bg-rose-500"
+                active={activeNav === 'recent-files'}
+                collapsed={collapsed}
+                onClick={() => onSelectNav('recent-files')}
+              />
+
+              <NavItem
+                icon={<Megaphone className="w-4 h-4 text-rose-500" />}
+                label="Announcements"
+                hasNotification={notifications.announcements}
+                notificationColor="bg-rose-500"
+                active={activeNav === 'announcements'}
+                collapsed={collapsed}
+                onClick={() => onSelectNav('announcements')}
+              />
             </div>
 
-            <NavItem
-              icon={<Clock className="w-4 h-4 text-emerald-500" />}
-              label="Recent Files"
-              hasNotification={notifications.recent}
-              notificationColor="bg-rose-500"
-              active={activeNav === 'recent-files'}
-              collapsed={collapsed}
-              onClick={() => onSelectNav('recent-files')}
-            />
-
-            <NavItem
-              icon={<Megaphone className="w-4 h-4 text-rose-500" />}
-              label="Announcements"
-              hasNotification={notifications.announcements}
-              notificationColor="bg-rose-500"
-              active={activeNav === 'announcements'}
-              collapsed={collapsed}
-              onClick={() => onSelectNav('announcements')}
-            />
-
-            {/* Admin-Only Recycle Bin (Trash System) */}
+            {/* Admin-Only Recycle Bin (Trash System - always accessible) */}
             {currentUser.role === 'admin' && (
               <NavItem
                 icon={<Trash2 className="w-4 h-4 text-rose-500" />}
@@ -287,7 +290,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <div className={`h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 ${collapsed ? 'mx-2' : 'mx-5'}`} />
+        <div className={`hidden md:block h-px bg-neutral-200/60 dark:bg-neutral-800/60 my-1 ${collapsed ? 'mx-2' : 'mx-5'}`} />
 
         {/* Root Folder Dropdown Tree */}
         <div className="px-0">
@@ -459,13 +462,6 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
       } catch (e) {}
     }
   }, [expanded, folder.id]);
-
-  // Automatically expand when this folder or subfolder becomes active
-  React.useEffect(() => {
-    if (isSelected || isChildSelected) {
-      setExpanded(true);
-    }
-  }, [isSelected, isChildSelected]);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();

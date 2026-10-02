@@ -114,7 +114,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
       size: calculatedSize,
       type,
       tag,
-      fileUrl: cloudinaryResult?.url,
+      fileUrl: cloudinaryResult?.url || (file ? URL.createObjectURL(file) : undefined),
       cloudinaryPublicId: cloudinaryResult?.public_id,
       resourceType: cloudinaryResult?.resource_type || 'raw',
       mimeType: file?.type || 'application/pdf',

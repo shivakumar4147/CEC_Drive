@@ -139,17 +139,19 @@ const DocumentGridItem: React.FC<{
         onDocumentClick(doc);
       }
     } else {
-      // PC View: Click to select single, Ctrl + Click for multi-select
+      // PC View: Ctrl/Cmd + Click toggles selection, single click directly opens file preview
       const isMulti = e.ctrlKey || e.metaKey;
-      onToggleSelect(doc.id, isMulti);
+      if (isMulti) {
+        onToggleSelect(doc.id, true);
+      } else {
+        onDocumentClick(doc);
+      }
     }
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
-    const isMobile = window.innerWidth < 768;
-    if (!isMobile) {
-      onDocumentClick(doc);
-    }
+    e.stopPropagation();
+    onDocumentClick(doc);
   };
 
   return (

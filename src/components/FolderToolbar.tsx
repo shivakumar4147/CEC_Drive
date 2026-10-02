@@ -243,18 +243,18 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
         <div className="flex items-center gap-1 flex-wrap">
           {/* + New Dropdown */}
           {canModify && (
-            <div className="relative">
+            <div className="relative shrink-0">
               <button
                 onClick={() => {
                   setIsNewMenuOpen(!isNewMenuOpen);
                   setIsSortMenuOpen(false);
                   setIsViewMenuOpen(false);
                 }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 font-medium transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 h-[32px] rounded-lg border border-transparent text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 font-medium transition-all cursor-pointer"
               >
-                <Plus className="w-4 h-4 text-blue-500" />
+                <Plus className="w-4 h-4 text-blue-500 shrink-0" />
                 <span className="font-semibold">New</span>
-                <ChevronDown className="w-3 h-3 text-neutral-400" />
+                <ChevronDown className="w-3 h-3 text-neutral-400 shrink-0" />
               </button>
 
               {isNewMenuOpen && (
@@ -266,7 +266,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
-                    <FolderPlus className="w-4 h-4 text-blue-500" />
+                    <FolderPlus className="w-4 h-4 text-blue-500 shrink-0" />
                     <span>Folder</span>
                   </button>
                   <button
@@ -276,7 +276,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
-                    <FilePlus className="w-4 h-4 text-emerald-500" />
+                    <FilePlus className="w-4 h-4 text-emerald-500 shrink-0" />
                     <span>File Upload</span>
                   </button>
                 </div>
@@ -284,27 +284,27 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             </div>
           )}
 
-          {canModify && <div className="h-4 w-[1px] bg-neutral-300 dark:bg-neutral-800 mx-0.5" />}
+          {canModify && <div className="h-4 w-[1px] bg-neutral-300 dark:bg-neutral-800 mx-0.5 shrink-0" />}
 
           {/* Cut / Move Button */}
           {canModify && (
             <button
               onClick={() => selectedDocIds.length > 0 && setIsMoveModalOpen(true)}
               disabled={selectedDocIds.length === 0}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all ${
+              className={`flex items-center justify-center gap-1.5 w-[88px] h-[32px] shrink-0 rounded-lg border transition-all ${
                 selectedDocIds.length > 0
-                  ? 'bg-purple-600 hover:bg-purple-700 text-white font-medium shadow-2xs cursor-pointer'
-                  : 'text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
+                  ? 'bg-purple-600 hover:bg-purple-700 border-purple-600 text-white font-medium shadow-2xs cursor-pointer'
+                  : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
               }`}
               title={selectedDocIds.length > 0 ? 'Move selected file(s)' : 'Select file(s) to move'}
             >
-              <Scissors className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Move</span>
-              {selectedDocIds.length > 0 && <span className="font-mono">({selectedDocIds.length})</span>}
+              <Scissors className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline font-medium">Move</span>
+              {selectedDocIds.length > 0 && <span className="font-mono text-xs">({selectedDocIds.length})</span>}
             </button>
           )}
 
-          {/* Download Button */}
+          {/* Download Button - Fixed 120px Container (Zero Shift) */}
           <button
             onClick={() => {
               if (selectedFolderIds.length > 0) {
@@ -314,10 +314,10 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               }
             }}
             disabled={selectedFolderIds.length === 0 && selectedDocIds.length === 0}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all ${
+            className={`flex items-center justify-center gap-1.5 w-[120px] h-[32px] shrink-0 rounded-lg border transition-all ${
               selectedFolderIds.length > 0 || selectedDocIds.length > 0
-                ? 'bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-2xs cursor-pointer'
-                : 'text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
+                ? 'bg-emerald-600 hover:bg-emerald-700 border-emerald-600 text-white font-medium shadow-2xs cursor-pointer'
+                : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
             }`}
             title={
               selectedFolderIds.length > 0 || selectedDocIds.length > 0
@@ -325,25 +325,25 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                 : 'Select item(s) to download'
             }
           >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Download</span>
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline font-medium">Download</span>
             {(selectedFolderIds.length > 0 || selectedDocIds.length > 0) && (
-              <span className="font-mono">
+              <span className="font-mono text-xs">
                 ({selectedFolderIds.length > 0 ? selectedFolderIds.length : selectedDocIds.length})
               </span>
             )}
           </button>
 
-          {/* Pin / Quick Access Button */}
+          {/* Pin / Quick Access Button - Fixed 92px Container (Zero Shift) */}
           <button
             onClick={() => targetPinFolderId && onTogglePinFolder && onTogglePinFolder(targetPinFolderId)}
             disabled={!isPinActive}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all ${
+            className={`flex items-center justify-center gap-1.5 w-[92px] h-[32px] shrink-0 rounded-lg border transition-all ${
               isPinActive
                 ? isTargetPinned
-                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-semibold cursor-pointer border border-amber-300 dark:border-amber-700'
-                  : 'text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 font-medium cursor-pointer'
-                : 'text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-semibold cursor-pointer border-amber-300 dark:border-amber-700'
+                  : 'border-transparent text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 font-medium cursor-pointer'
+                : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
             }`}
             title={
               isPinActive
@@ -353,8 +353,8 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                 : 'Select a folder or enter a folder to pin'
             }
           >
-            <Pin className={`w-3.5 h-3.5 ${isTargetPinned ? 'fill-amber-500 text-amber-500' : ''}`} />
-            <span className="hidden sm:inline">{isTargetPinned ? 'Pinned' : 'Pin Folder'}</span>
+            <Pin className={`w-3.5 h-3.5 shrink-0 ${isTargetPinned ? 'fill-amber-500 text-amber-500' : ''}`} />
+            <span className="hidden sm:inline font-medium">{isTargetPinned ? 'Pinned' : 'Pin'}</span>
           </button>
 
           {/* Rename Button */}
@@ -362,15 +362,15 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             <button
               onClick={() => isRenameActive && handleOpenRenameCurrent()}
               disabled={!isRenameActive}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all ${
+              className={`flex items-center justify-center gap-1.5 w-[90px] h-[32px] shrink-0 rounded-lg border transition-all ${
                 isRenameActive
-                  ? 'text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 font-medium cursor-pointer'
-                  : 'text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
+                  ? 'border-transparent text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 font-medium cursor-pointer'
+                  : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
               }`}
               title={isRenameActive ? 'Rename selected item' : 'Select single item to rename'}
             >
-              <Edit2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Rename</span>
+              <Edit2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline font-medium">Rename</span>
             </button>
           )}
 
@@ -379,34 +379,34 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             <button
               onClick={() => isDeleteActive && handleDeleteCurrent()}
               disabled={!isDeleteActive}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all ${
+              className={`flex items-center justify-center gap-1.5 w-[86px] h-[32px] shrink-0 rounded-lg border transition-all ${
                 isDeleteActive
-                  ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-medium cursor-pointer'
-                  : 'text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
+                  ? 'border-transparent text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-medium cursor-pointer'
+                  : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
               }`}
               title={isDeleteActive ? 'Delete selected item(s)' : 'Select item(s) to delete'}
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Delete</span>
+              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline font-medium">Delete</span>
             </button>
           )}
         </div>
 
         {/* Right Section: Sort ⌄ & View ⌄ Dropdown Menus */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {/* Sort Dropdown Menu */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               onClick={() => {
                 setIsSortMenuOpen(!isSortMenuOpen);
                 setIsViewMenuOpen(false);
                 setIsNewMenuOpen(false);
               }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 h-[32px] rounded-lg border border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
             >
-              <ArrowUpDown className="w-3.5 h-3.5" />
+              <ArrowUpDown className="w-3.5 h-3.5 shrink-0" />
               <span className="font-medium">Sort</span>
-              <ChevronDown className="w-3 h-3 text-neutral-400" />
+              <ChevronDown className="w-3 h-3 text-neutral-400 shrink-0" />
             </button>
 
             {isSortMenuOpen && (
@@ -467,18 +467,18 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
           </div>
 
           {/* View Dropdown Menu */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               onClick={() => {
                 setIsViewMenuOpen(!isViewMenuOpen);
                 setIsSortMenuOpen(false);
                 setIsNewMenuOpen(false);
               }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 h-[32px] rounded-lg border border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
             >
-              <LayoutGrid className="w-3.5 h-3.5" />
+              <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
               <span className="font-medium">View</span>
-              <ChevronDown className="w-3 h-3 text-neutral-400" />
+              <ChevronDown className="w-3 h-3 text-neutral-400 shrink-0" />
             </button>
 
             {isViewMenuOpen && (
