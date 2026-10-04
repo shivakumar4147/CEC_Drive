@@ -94,31 +94,104 @@ interface PdfViewerCanvasProps {
 const PdfViewerCanvas: React.FC<PdfViewerCanvasProps> = ({ document, fileUrl, onDownload }) => {
   const [hasError, setHasError] = useState<boolean>(false);
 
-  const activeUrl = fileUrl || SAMPLE_PDF_DATA_URL;
+  const isBlobUrl = fileUrl?.startsWith('blob:');
+  const activeUrl = isBlobUrl ? undefined : (fileUrl || SAMPLE_PDF_DATA_URL);
+  const isRemoteHttpUrl = activeUrl && (activeUrl.startsWith('http://') || activeUrl.startsWith('https://'));
+  
+  // Clean embed URL by stripping /fl_attachment/ so Cloudinary serves the PDF with inline disposition
+  const cleanUrl = activeUrl ? activeUrl.replace(/\/fl_attachment\//g, '/') : undefined;
+
+  // Cloudinary URL analysis
+  const isCloudinaryUrl = isRemoteHttpUrl && cleanUrl?.includes('cloudinary.com');
+  const isCloudinaryRaw = isCloudinaryUrl && cleanUrl?.includes('/raw/upload/');
+
+  // Derive JPG page 1 preview URL (transforms /raw/upload/ to /image/upload/ automatically)
+  const cloudinaryJpgUrl = isCloudinaryUrl && cleanUrl
+    ? cleanUrl.replace('/raw/upload/', '/image/upload/').replace(/\.pdf$/i, '.jpg')
+    : undefined;
+
+  // Google Docs Viewer embed URL (bypasses raw Cloudinary 401 ACL restriction)
+  const googleDocsViewerUrl = cleanUrl
+    ? `https://docs.google.com/gview?url=${encodeURIComponent(cleanUrl)}&embedded=true`
+    : undefined;
+
+  // View Mode: 'google' | 'image' | 'native'
+  // Default to 'google' for ALL Cloudinary PDFs to ensure 100% reliable inline rendering before/after Cloudinary security setting updates
+  const [viewMode, setViewMode] = useState<'google' | 'image' | 'native'>(() => {
+    if (isCloudinaryUrl) return 'google';
+    return 'native';
+  });
+
+  const currentEmbedUrl = viewMode === 'google'
+    ? googleDocsViewerUrl
+    : cleanUrl;
+
+  if (isBlobUrl) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-neutral-900 text-white text-center">
+        <div className="p-6 rounded-3xl bg-neutral-800/80 border border-neutral-700/80 max-w-md space-y-4 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <div>
+            <h4 className="text-base font-bold text-white">Legacy Temporary File URL (`blob:`)</h4>
+            <p className="text-xs text-neutral-400 mt-2 leading-relaxed">
+              This document was previously saved with a temporary browser URL (<code className="text-amber-300 font-mono text-[11px] bg-neutral-900 px-1 py-0.5 rounded">blob:</code>).
+              Temporary browser URLs expire when the browser session ends and are not permanent Cloudinary assets.
+            </p>
+            <p className="text-xs text-neutral-300 mt-2 font-medium">
+              Please re-upload this PDF file using the Upload button to store a permanent Cloudinary asset.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Graceful Error Screen if external PDF load fails
   if (hasError) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-neutral-900 text-white text-center">
-        <div className="p-6 rounded-3xl bg-neutral-800/80 border border-neutral-700/80 max-w-sm space-y-4 shadow-2xl">
-          <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto">
+        <div className="p-6 rounded-3xl bg-neutral-800/80 border border-neutral-700/80 max-w-md space-y-4 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto">
             <AlertCircle className="w-7 h-7" />
           </div>
           <div>
-            <h4 className="text-base font-bold text-white">Preview Stream Unavailable</h4>
-            <p className="text-xs text-neutral-400 mt-1">
-              Unable to display inline preview stream for <span className="font-semibold text-neutral-200">{document.name}</span>.
+            <h4 className="text-base font-bold text-white">PDF Preview Restriction</h4>
+            <p className="text-xs text-neutral-400 mt-2 leading-relaxed">
+              The direct browser embed encountered a restriction. You can view the derived image preview or download the file.
             </p>
           </div>
-          {onDownload && (
-            <button
-              onClick={() => onDownload(document)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download Exact PDF File</span>
-            </button>
+
+          {cloudinaryJpgUrl && (
+            <div className="p-3 rounded-2xl bg-neutral-900 border border-neutral-800 text-left space-y-2">
+              <span className="text-[11px] font-semibold text-neutral-300 block">Page 1 Image Preview (Derived from Cloudinary):</span>
+              <img src={cloudinaryJpgUrl} alt="PDF Page 1 Preview" className="w-full max-h-48 object-contain rounded-lg border border-neutral-800" />
+            </div>
           )}
+
+          <div className="flex flex-col gap-2 pt-2">
+            {activeUrl && (
+              <a
+                href={activeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>Open Cloudinary PDF Direct URL</span>
+              </a>
+            )}
+            {onDownload && (
+              <button
+                onClick={() => onDownload(document)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download PDF Document</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -128,33 +201,87 @@ const PdfViewerCanvas: React.FC<PdfViewerCanvasProps> = ({ document, fileUrl, on
     <div className="w-full h-full flex flex-col bg-[#2a2a2e] relative overflow-hidden">
       {/* PDF Controls Toolbar Strip */}
       <div className="h-10 bg-[#1c1c1f] text-neutral-300 px-4 flex items-center justify-between border-b border-neutral-800 shrink-0 text-xs font-sans">
-        <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-rose-400" />
-          <span className="font-medium text-neutral-200 truncate max-w-[200px] sm:max-w-xs" title={document.name}>
+        <div className="flex items-center gap-2 min-w-0">
+          <FileText className="w-4 h-4 text-rose-400 shrink-0" />
+          <span className="font-medium text-neutral-200 truncate max-w-[150px] sm:max-w-xs" title={document.name}>
             {document.name}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <a
-            href={activeUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-blue-400 hover:text-blue-300 hover:bg-neutral-800 rounded transition-colors"
+        {/* View Mode Toggle Buttons */}
+        <div className="flex items-center gap-1.5 bg-neutral-900/80 p-0.5 rounded-lg border border-neutral-800">
+          <button
+            onClick={() => setViewMode('google')}
+            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
+              viewMode === 'google'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-neutral-400 hover:text-white'
+            }`}
+            title="Render using Google Docs Document Viewer"
           >
-            <span>Open Original PDF</span>
-            <ExternalLink className="w-3 h-3" />
-          </a>
+            Google Viewer
+          </button>
+
+          {cloudinaryJpgUrl && (
+            <button
+              onClick={() => setViewMode('image')}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
+                viewMode === 'image'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Render Page 1 JPG Image Preview"
+            >
+              Image Preview
+            </button>
+          )}
+
+          <button
+            onClick={() => setViewMode('native')}
+            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
+              viewMode === 'native'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-neutral-400 hover:text-white'
+            }`}
+            title="Render Native Browser Iframe Embed"
+          >
+            Direct Embed
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {activeUrl && (
+            <a
+              href={activeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-blue-400 hover:text-blue-300 hover:bg-neutral-800 rounded transition-colors"
+            >
+              <span>Open Original</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
         </div>
       </div>
 
-      {/* Actual Uploaded PDF File Native Renderer (iframe / embed) */}
-      <iframe
-        src={activeUrl}
-        title={`PDF preview of ${document.name}`}
-        className="w-full h-full border-none bg-white"
-        onError={() => setHasError(true)}
-      />
+      {/* Main Preview Container */}
+      {viewMode === 'image' && cloudinaryJpgUrl ? (
+        <div className="w-full h-full overflow-auto p-4 flex items-center justify-center bg-[#18181b]">
+          <img
+            src={cloudinaryJpgUrl}
+            alt={`PDF Preview of ${document.name}`}
+            className="max-w-full max-h-full object-contain rounded-xl shadow-2xl border border-neutral-800"
+            onError={() => setHasError(true)}
+          />
+        </div>
+      ) : (
+        <iframe
+          src={currentEmbedUrl}
+          title={`PDF preview of ${document.name}`}
+          className="w-full h-full border-none bg-white"
+          onError={() => setHasError(true)}
+        />
+      )}
     </div>
   );
 };
@@ -229,11 +356,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
       {/* Main Redesigned Viewer Modal Card */}
-      <div className="relative w-full max-w-6xl h-[92vh] sm:h-[90vh] bg-white dark:bg-[#0f0f11] rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden z-10 animate-in zoom-in-95 duration-150 flex flex-col">
+      <div className="relative w-full max-w-6xl h-[92vh] sm:h-[90vh] bg-white dark:bg-[#0f0f11] rounded-none border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden z-10 animate-in zoom-in-95 duration-150 flex flex-col">
         {/* 1. TOP HEADER (Compact File Identity Bar) */}
         <div className="h-14 border-b border-neutral-200/80 dark:border-neutral-800 px-4 sm:px-5 flex items-center justify-between bg-white dark:bg-[#0f0f11] shrink-0 z-20">
           <div className="flex items-center gap-3 min-w-0 pr-4">
-            <div className={`p-2 rounded-xl border shrink-0 ${getFormatIconBg()}`}>
+            <div className={`p-2 rounded-none border shrink-0 ${getFormatIconBg()}`}>
               {getFormatIcon()}
             </div>
             <div className="flex items-center gap-2 min-w-0">
@@ -244,7 +371,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               >
                 {document.name}
               </h3>
-              <span className="px-2 py-0.5 text-[10px] font-extrabold font-mono uppercase bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-md border border-neutral-200/80 dark:border-neutral-700/80 shrink-0">
+              <span className="px-2 py-0.5 text-[10px] font-extrabold font-mono uppercase bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-none border border-neutral-200/80 dark:border-neutral-700/80 shrink-0">
                 {formatBadgeLabel}
               </span>
             </div>
@@ -510,8 +637,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           ) : (
             /* UNSUPPORTED FILE PLACEHOLDER (ONLY FOR OTHER FORMATS) */
             <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center">
-              <div className="p-6 rounded-3xl bg-white dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800 shadow-xl max-w-sm space-y-4">
-                <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex items-center justify-center text-blue-600 dark:text-blue-400 mx-auto">
+              <div className="p-6 rounded-none bg-white dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800 shadow-xl max-w-sm space-y-4">
+                <div className="w-16 h-16 rounded-none bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex items-center justify-center text-blue-600 dark:text-blue-400 mx-auto">
                   {getFormatIcon()}
                 </div>
                 <div>
@@ -528,7 +655,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 {onDownload && (
                   <button
                     onClick={() => onDownload(document)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-none shadow-xs transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     <span>Download File</span>
@@ -544,7 +671,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           {/* Left: Information Panel Toggle Button (ⓘ) */}
           <button
             onClick={() => setShowInfoPanel(!showInfoPanel)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-none text-xs font-medium transition-colors ${
               showInfoPanel
                 ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
                 : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800'
@@ -560,7 +687,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             {onDownload && (
               <button
                 onClick={() => onDownload(document)}
-                className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-xs transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-none shadow-xs transition-colors"
               >
                 <Download className="w-4 h-4" />
                 <span>Download</span>
@@ -571,20 +698,20 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             <div className="relative">
               <button
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-white rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-white rounded-none hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
                 title="More Actions"
               >
                 <MoreVertical className="w-4 h-4" />
               </button>
 
               {showMoreMenu && (
-                <div className="absolute right-0 bottom-12 w-48 bg-white dark:bg-[#18181b] border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl p-1.5 z-40 space-y-1 animate-in zoom-in-95 duration-100">
+                <div className="absolute right-0 bottom-12 w-48 bg-white dark:bg-[#18181b] border border-neutral-200 dark:border-neutral-800 rounded-none shadow-2xl p-1.5 z-40 space-y-1 animate-in zoom-in-95 duration-100">
                   <button
                     onClick={() => {
                       onToggleStar && onToggleStar(document.id);
                       setShowMoreMenu(false);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl text-left"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-none text-left"
                   >
                     <Star
                       className={`w-4 h-4 ${

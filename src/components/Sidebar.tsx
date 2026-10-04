@@ -44,6 +44,7 @@ interface SidebarProps {
     normal?: boolean;
   };
   deletedCount?: number;
+  onDropFiles?: (targetFolderId: string, files: File[]) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -129,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`relative flex flex-col h-full bg-white dark:bg-black border-r border-neutral-200/90 dark:border-neutral-900 transition-all duration-300 ease-in-out select-none shrink-0 overflow-hidden ${
+      className={`relative flex flex-col h-full bg-white dark:bg-[#191919] border-r border-neutral-200/90 dark:border-[#2a2a2a] transition-all duration-300 ease-in-out select-none shrink-0 overflow-hidden ${
         collapsed ? 'w-16' : 'w-64'
       }`}
       aria-label="Sidebar navigation"
@@ -328,16 +329,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* Footer: Theme Toggle & User Account */}
-      <div className="py-2 border-t border-neutral-100 dark:border-neutral-900/80 bg-neutral-50/50 dark:bg-black space-y-1 shrink-0">
+      <div className="py-2 border-t border-neutral-100 dark:border-[#2a2a2a] bg-neutral-50/50 dark:bg-[#191919] space-y-1 shrink-0">
         <div className="relative group px-2">
           <button
             type="button"
             onClick={onToggleTheme}
-            title={collapsed ? (theme === 'dark' ? 'Full Black (OLED)' : 'Light Theme') : undefined}
+            title={collapsed ? (theme === 'dark' ? 'Dark Theme' : 'Light Theme') : undefined}
             className={`w-full flex items-center py-2 rounded-xl text-sm font-medium transition-all hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 text-neutral-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer ${
               collapsed ? 'justify-center px-0' : 'px-3'
             }`}
-            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'full black'} mode`}
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
           >
             <div
               className={`flex items-center ${
@@ -354,7 +355,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </span>
                 {!collapsed && (
                   <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate whitespace-nowrap">
-                    {theme === 'dark' ? 'Full Black (OLED)' : 'Light Theme'}
+                    {theme === 'dark' ? 'Dark Theme' : 'Light Theme'}
                   </span>
                 )}
               </div>
@@ -422,6 +423,7 @@ interface SidebarFolderTreeNodeProps {
   allFolders: FolderItem[];
   currentFolderId: string | null;
   onSelectFolder: (id: string) => void;
+  onDropFiles?: (targetFolderId: string, files: File[]) => void;
   level?: number;
 }
 
@@ -430,8 +432,11 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
   allFolders,
   currentFolderId,
   onSelectFolder,
+  onDropFiles,
   level = 0,
 }) => {
+  const [isDragOver, setIsDragOver] = useState(false);
+
   const subfolders = allFolders.filter((f) => {
     const isDel = f.isDeleted || (f as any).is_deleted;
     if (isDel) return false;
@@ -469,14 +474,40 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
     onSelectFolder(folder.id);
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragOver) setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0 && onDropFiles) {
+      onDropFiles(folder.id, Array.from(e.dataTransfer.files));
+    }
+  };
+
   return (
     <div className="space-y-0.5">
       <button
         type="button"
         onClick={handleClick}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         style={{ paddingLeft: `${level * 10 + 16}px` }}
         className={`w-full flex items-center justify-between py-1.5 pr-2.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
-          isSelected
+          isDragOver
+            ? 'bg-blue-100 dark:bg-blue-900/80 text-blue-600 dark:text-blue-300 font-bold ring-2 ring-blue-500 z-10'
+            : isSelected
             ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-semibold'
             : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100/80 dark:hover:bg-neutral-900/80 hover:text-neutral-900 dark:hover:text-white'
         }`}
@@ -509,6 +540,7 @@ const SidebarFolderTreeNode: React.FC<SidebarFolderTreeNodeProps> = ({
               allFolders={allFolders}
               currentFolderId={currentFolderId}
               onSelectFolder={onSelectFolder}
+              onDropFiles={onDropFiles}
               level={level + 1}
             />
           ))}

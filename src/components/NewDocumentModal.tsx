@@ -51,23 +51,34 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
     e.preventDefault();
     if (!name.trim()) return;
 
+    if (!file) {
+      setUploadError('Please select a document file to upload.');
+      return;
+    }
+
     const docId = `doc-${Date.now()}`;
     setIsUploading(true);
     setUploadError(null);
 
+    // Step 1: Upload PDF/Document to Cloudinary
     let cloudinaryResult = null;
-    if (file) {
-      try {
-        cloudinaryResult = await uploadFileToCloudinary(file, {
-          folderId: selectedFolderId,
-          docId: docId,
-          currentUserProfile: currentUserProfile,
-        });
-      } catch (err: any) {
-        setUploadError(err.message || 'Upload failed');
-        setIsUploading(false);
-        return;
-      }
+    try {
+      cloudinaryResult = await uploadFileToCloudinary(file, {
+        folderId: selectedFolderId,
+        docId: docId,
+        currentUserProfile: currentUserProfile,
+      });
+    } catch (err: any) {
+      console.error('Cloudinary upload step failed:', err);
+      setUploadError(err.message || 'Cloudinary upload failed.');
+      setIsUploading(false);
+      return;
+    }
+
+    if (!cloudinaryResult || !cloudinaryResult.url || cloudinaryResult.url.startsWith('blob:')) {
+      setUploadError('Cloudinary upload error: No permanent URL returned from Cloudinary server.');
+      setIsUploading(false);
+      return;
     }
 
     const initials = authorName
@@ -95,9 +106,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
       year: 'numeric',
     });
 
-    const calculatedSize = cloudinaryResult
-      ? `${(cloudinaryResult.bytes / (1024 * 1024)).toFixed(1)} MB`
-      : `${(Math.random() * 8 + 1.2).toFixed(1)} MB`;
+    const calculatedSize = `${(cloudinaryResult.bytes / (1024 * 1024)).toFixed(1)} MB`;
 
     const newDoc: DocumentItem = {
       id: docId,
@@ -114,16 +123,26 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
       size: calculatedSize,
       type,
       tag,
-      fileUrl: cloudinaryResult?.url || (file ? URL.createObjectURL(file) : undefined),
-      cloudinaryPublicId: cloudinaryResult?.public_id,
-      resourceType: cloudinaryResult?.resource_type || 'raw',
-      mimeType: file?.type || 'application/pdf',
-      originalFilename: file?.name || name.trim(),
+      fileUrl: cloudinaryResult.url,
+      cloudinaryPublicId: cloudinaryResult.public_id,
+      resourceType: cloudinaryResult.resource_type || 'raw',
+      mimeType: file.type || 'application/pdf',
+      originalFilename: file.name || name.trim(),
     };
 
-    // Save metadata to Supabase documents table
-    await saveDocumentWithCloudinary(newDoc);
+    // Step 2: Insert permanent metadata into Supabase
+    try {
+      await saveDocumentWithCloudinary(newDoc);
+    } catch (err: any) {
+      console.error('Supabase database save error:', err);
+      setUploadError(
+        `File uploaded to Cloudinary (Public ID: ${cloudinaryResult.public_id}), but database save failed: ${err.message || 'Supabase error'}`
+      );
+      setIsUploading(false);
+      return;
+    }
 
+    // Step 3: Only update UI and close modal after complete success
     onAddDocument(newDoc);
     setIsUploading(false);
     setFile(null);
@@ -140,10 +159,10 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
     >
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
-      <div className="relative w-full max-w-md bg-white dark:bg-[#0a0a0a] rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden z-10 animate-in zoom-in-95 duration-150">
+      <div className="relative w-full max-w-md bg-white dark:bg-[#0a0a0a] rounded-none border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden z-10 animate-in zoom-in-95 duration-150">
         <div className="flex items-center justify-between p-5 border-b border-neutral-100 dark:border-neutral-900">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600">
+            <div className="p-2 rounded-none bg-blue-50 dark:bg-blue-950/40 text-blue-600">
               <CloudUpload className="w-5 h-5" />
             </div>
             <div>
@@ -161,7 +180,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors"
+            className="p-1.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded-none hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -169,7 +188,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {uploadError && (
-            <div className="p-3 text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800">
+            <div className="p-3 text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-none border border-rose-200 dark:border-rose-800">
               {uploadError}
             </div>
           )}
@@ -179,7 +198,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
             <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
               Select Document File
             </label>
-            <div className="relative border-2 border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl p-4 text-center hover:border-blue-500 transition-colors bg-neutral-50/50 dark:bg-neutral-900/40 cursor-pointer">
+            <div className="relative border-2 border-dashed border-neutral-200 dark:border-neutral-800 rounded-none p-4 text-center hover:border-blue-500 transition-colors bg-neutral-50/50 dark:bg-neutral-900/40 cursor-pointer">
               <input
                 type="file"
                 onChange={handleFileChange}
@@ -217,7 +236,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. DBMS Unit 2 Complete Notes PDF"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-neutral-400"
+              className="w-full px-3.5 py-2.5 rounded-none border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-neutral-400"
             />
           </div>
 
@@ -230,7 +249,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
               <select
                 value={selectedFolderId || ''}
                 onChange={(e) => setSelectedFolderId(e.target.value ? e.target.value : null)}
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-2.5 rounded-none border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Root / Unassigned</option>
                 {folders.map((f) => (
@@ -251,7 +270,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
               required
               value={authorName}
               onChange={(e) => setAuthorName(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              className="w-full px-3.5 py-2.5 rounded-none border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             />
           </div>
 
@@ -263,7 +282,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value as DocumentItem['type'])}
-                className="w-full px-3 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2.5 rounded-none border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="pdf">PDF Document</option>
                 <option value="doc">Word / Spec</option>
@@ -279,7 +298,7 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
               <select
                 value={tag}
                 onChange={(e) => setTag(e.target.value as 'important' | 'normal')}
-                className="w-full px-3 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2.5 rounded-none border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#121212] text-sm text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="normal">Normal</option>
                 <option value="important">Important</option>
@@ -292,14 +311,14 @@ export const NewDocumentModal: React.FC<NewDocumentModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={isUploading}
-              className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900 rounded-lg"
+              className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900 rounded-none"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isUploading}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition-colors disabled:opacity-75"
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-none shadow-xs transition-colors disabled:opacity-75"
             >
               {isUploading ? (
                 <>

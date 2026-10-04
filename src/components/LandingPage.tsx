@@ -20,7 +20,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { SynapseLogo } from './SynapseLogo';
-import { ThemeMode, UserRole, UserProfile } from '../types';
+import { ThemeMode, UserRole, UserProfile, normalizeUserRole } from '../types';
 import { supabase } from '../lib/supabase';
 
 interface LandingPageProps {
@@ -158,7 +158,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         if (signInData?.user) {
           const meta = signInData.user.user_metadata || {};
-          const detectedRole: UserRole = (meta.role as UserRole) || (selectedRole === 'student' ? 'student' : 'uploader');
+          let detectedRole: UserRole | undefined = meta.role ? normalizeUserRole(meta.role) : undefined;
+
+          // Query canonical user role from public.profiles database table by ID or Email
+          try {
+            const { data: dbProfiles } = await supabase
+              .from('profiles')
+              .select('id, role, name, department, section, email')
+              .or(`id.eq.${signInData.user.id},email.ilike.${activeEmail}`);
+
+            const dbProfile = dbProfiles && dbProfiles.length > 0 ? dbProfiles[0] : null;
+
+            if (dbProfile?.role) {
+              const parsed = normalizeUserRole(dbProfile.role);
+              if (parsed) detectedRole = parsed;
+            }
+          } catch (profileLookupErr) {
+            console.warn('Profile DB lookup during sign in warning:', profileLookupErr);
+          }
+
+          // Fallback logic if role is not in DB or Auth metadata
+          if (!detectedRole) {
+            if (activeEmail.toLowerCase() === 'admin@cec.edu.in' || activeEmail.toLowerCase().includes('admin')) {
+              detectedRole = 'admin';
+            } else {
+              detectedRole = selectedRole === 'student' ? 'student' : 'uploader';
+            }
+          }
+
           const userName = meta.name || activeEmail.split('@')[0] || 'User';
 
           onLoginSuccess(detectedRole, {
@@ -166,10 +193,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             name: userName,
             email: signInData.user.email || activeEmail,
             role: detectedRole,
-            department: meta.department || (detectedRole === 'student' ? 'CSE' : 'CSE'),
+            department: meta.department || 'CSE',
             section: meta.section || 'Sec A',
             initial: (userName[0] || 'U').toUpperCase(),
-            bgColor: detectedRole === 'student' ? 'bg-blue-600' : 'bg-amber-600',
+            bgColor: detectedRole === 'admin' ? 'bg-purple-600' : detectedRole === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
           });
         }
       } else {

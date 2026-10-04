@@ -17,7 +17,7 @@ export const HeaderAccountMenu: React.FC<HeaderAccountMenuProps> = ({
     <button
       type="button"
       onClick={() => onOpenProfile && onOpenProfile()}
-      className="shrink-0 p-0 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer transition-transform hover:scale-105 active:scale-95"
+      className="shrink-0 p-0 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer transition-colors active:scale-95"
       aria-label="Open Account Profile"
       title="View Account Profile"
     >

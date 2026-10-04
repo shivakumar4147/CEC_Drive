@@ -42,18 +42,32 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
 
   const totalCount = deletedFolders.length + deletedDocuments.length;
 
-  const getParentFolderName = (parentId?: string | null) => {
+  const getFullFolderPath = (parentId?: string | null) => {
     if (!parentId) return 'Root Directory';
     const parent = allFolders.find((f) => f.id === parentId);
-    return parent ? parent.name : 'Unknown Folder';
+    if (!parent) return 'Root Directory';
+
+    const path: string[] = [parent.name];
+    let currentParentId = parent.parentId || (parent as any).parent_id;
+
+    while (currentParentId) {
+      const ancestor = allFolders.find((f) => f.id === currentParentId);
+      if (ancestor) {
+        path.unshift(ancestor.name);
+        currentParentId = ancestor.parentId || (ancestor as any).parent_id;
+      } else {
+        break;
+      }
+    }
+    return path.join(' / ');
   };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Top Banner & Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-rose-500/10 via-purple-500/5 to-transparent border border-rose-500/20 dark:border-rose-500/30 backdrop-blur-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-none bg-gradient-to-r from-rose-500/10 via-purple-500/5 to-transparent border border-rose-500/20 dark:border-rose-500/30 backdrop-blur-xs">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 shadow-inner">
+          <div className="w-12 h-12 rounded-none bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 shadow-inner">
             <Trash2 className="w-6 h-6" />
           </div>
           <div>
@@ -61,7 +75,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
               <h2 className="text-xl font-bold text-neutral-900 dark:text-white tracking-tight">
                 Admin Recycle Bin
               </h2>
-              <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 font-mono">
+              <span className="px-2.5 py-0.5 text-xs font-semibold rounded-none bg-rose-500/15 text-rose-700 dark:text-rose-300 font-mono">
                 {totalCount} item{totalCount === 1 ? '' : 's'}
               </span>
             </div>
@@ -74,7 +88,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
         {totalCount > 0 && (
           <button
             onClick={onEmptyRecycleBin}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-semibold text-xs transition-all shadow-md cursor-pointer shrink-0"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-none bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-semibold text-xs transition-all shadow-md cursor-pointer shrink-0"
           >
             <Trash2 className="w-4 h-4" />
             <span>Empty Recycle Bin</span>
@@ -83,7 +97,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
       </div>
 
       {/* Toolbar & Search */}
-      <div className="flex items-center justify-between gap-3 p-2 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800">
+      <div className="flex items-center justify-between gap-3 p-2 rounded-none bg-neutral-50 dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
           <input
@@ -91,15 +105,15 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search deleted files and folders..."
-            className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 focus:outline-none focus:ring-2 focus:ring-rose-500 text-neutral-900 dark:text-white"
+            className="w-full pl-9 pr-4 py-1.5 text-xs rounded-none bg-white dark:bg-black border border-neutral-200 dark:border-neutral-800 focus:outline-none focus:ring-2 focus:ring-rose-500 text-neutral-900 dark:text-white"
           />
         </div>
       </div>
 
       {/* Main Table */}
       {totalCount === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 px-4 text-center rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30">
-          <div className="w-14 h-14 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mb-3">
+        <div className="flex flex-col items-center justify-center py-16 px-4 text-center rounded-none border border-dashed border-neutral-300 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30">
+          <div className="w-14 h-14 rounded-none bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mb-3">
             <Trash2 className="w-7 h-7" />
           </div>
           <h3 className="text-base font-bold text-neutral-800 dark:text-neutral-200">
@@ -110,7 +124,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-neutral-200/80 dark:border-neutral-800 bg-white dark:bg-black shadow-xs">
+        <div className="overflow-x-auto rounded-none border border-neutral-200/80 dark:border-neutral-800 bg-white dark:bg-black shadow-xs">
           <table className="w-full text-left border-collapse select-none">
             <thead>
               <tr className="border-b border-neutral-200/80 dark:border-neutral-900 text-[11px] font-bold text-neutral-400 uppercase tracking-wider bg-neutral-50/80 dark:bg-neutral-900/50">
@@ -130,7 +144,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                 >
                   <td className="py-3 pl-4 pr-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-none bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
                         <FolderIcon className="w-4 h-4 fill-amber-500/20" />
                       </div>
                       <div>
@@ -142,7 +156,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                     </div>
                   </td>
                   <td className="py-3 px-3 font-mono text-neutral-500 dark:text-neutral-400">
-                    {getParentFolderName(folder.parentId)}
+                    {getFullFolderPath(folder.parentId)}
                   </td>
                   <td className="py-3 px-3 font-medium text-neutral-700 dark:text-neutral-300">
                     {folder.deletedBy || 'System / Admin'}
@@ -154,7 +168,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                     <div className="flex items-center justify-end gap-1.5">
                       <button
                         onClick={() => onRestoreFolder(folder.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 font-semibold transition-colors cursor-pointer"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-none text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 font-semibold transition-colors cursor-pointer"
                         title="Restore Folder"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
@@ -162,7 +176,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                       </button>
                       <button
                         onClick={() => onPermanentDeleteFolder(folder.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-semibold transition-colors cursor-pointer"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-none text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-semibold transition-colors cursor-pointer"
                         title="Delete Permanently"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -181,7 +195,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                 >
                   <td className="py-3 pl-4 pr-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-none bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
                         <FileText className="w-4 h-4" />
                       </div>
                       <div>
@@ -195,7 +209,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                     </div>
                   </td>
                   <td className="py-3 px-3 font-mono text-neutral-500 dark:text-neutral-400">
-                    {getParentFolderName(doc.folderId)}
+                    {getFullFolderPath(doc.folderId)}
                   </td>
                   <td className="py-3 px-3 font-medium text-neutral-700 dark:text-neutral-300">
                     {doc.deletedBy || 'System / Admin'}
@@ -207,7 +221,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                     <div className="flex items-center justify-end gap-1.5">
                       <button
                         onClick={() => onRestoreDoc(doc.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 font-semibold transition-colors cursor-pointer"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-none text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 font-semibold transition-colors cursor-pointer"
                         title="Restore File"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
@@ -215,7 +229,7 @@ export const RecycleBinView: React.FC<RecycleBinViewProps> = ({
                       </button>
                       <button
                         onClick={() => onPermanentDeleteDoc(doc.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-semibold transition-colors cursor-pointer"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-none text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-semibold transition-colors cursor-pointer"
                         title="Delete Permanently"
                       >
                         <Trash2 className="w-3.5 h-3.5" />

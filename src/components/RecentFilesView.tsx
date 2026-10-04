@@ -35,7 +35,7 @@ export const RecentFilesView: React.FC<RecentFilesViewProps> = ({
             className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors group"
           >
             <div className="flex items-center gap-3.5 min-w-0">
-              <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
+              <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 shrink-0">
                 <FileText className="w-5 h-5" />
               </div>
               <div className="min-w-0">

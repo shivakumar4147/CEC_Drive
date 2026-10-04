@@ -34,13 +34,16 @@ import { FolderToolbar } from './components/FolderToolbar';
 import { DocumentTable, SortField, SortOrder } from './components/DocumentTable';
 import { DocumentGrid } from './components/DocumentGrid';
 import { supabase } from './lib/supabase';
-import { handleSecureFileDownload } from './lib/cloudinary';
+import { handleSecureFileDownload, uploadFileToCloudinary, saveDocumentWithCloudinary } from './lib/cloudinary';
 import { logActivity } from './lib/activity';
 import { BatchActionBar } from './components/BatchActionBar';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { NewDocumentModal } from './components/NewDocumentModal';
 import { RecycleBinView } from './components/RecycleBinView';
 import { ResetPasswordModal } from './components/ResetPasswordModal';
+import { DeleteConfirmationModal } from './components/DeleteConfirmationModal';
+import { ConfirmModal } from './components/ConfirmModal';
+import { getUniqueItemName } from './lib/nameUtils';
 import {
   DocumentItem,
   FolderItem,
@@ -49,7 +52,47 @@ import {
   ActiveNavKey,
   UserRole,
   UserProfile,
+  UploadingDocItem,
+  normalizeUserRole,
 } from './types';
+
+const isValidUUID = (str: string): boolean => {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+};
+
+const getLocalDeletedDocIds = (): Set<string> => {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem('cec_drive_deleted_doc_ids');
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const saveLocalDeletedDocIds = (ids: Set<string>) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('cec_drive_deleted_doc_ids', JSON.stringify(Array.from(ids)));
+  } catch {}
+};
+
+const getLocalDeletedFolderIds = (): Set<string> => {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem('cec_drive_deleted_folder_ids');
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const saveLocalDeletedFolderIds = (ids: Set<string>) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('cec_drive_deleted_folder_ids', JSON.stringify(Array.from(ids)));
+  } catch {}
+};
 
 // Complete University File Explorer Hierarchy:
 // Year (2026-2027) -> Semester (1st to 8th) -> Department (CSE, ECE, ME, AI&DS) -> Section (Sec A, Sec B) -> Subject/Notes Folders -> Files
@@ -298,6 +341,125 @@ export default function App() {
   // Reset Password Modal State
   const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
 
+  // Unified Bulk Delete Confirmation Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  // Auto-focus Inline Editing Folder State
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+
+  // Generic Custom Confirm Modal State (replaces native window.confirm)
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    itemName?: string;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'danger' | 'warning';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  // Active File Upload Progress State
+  const [uploadingDocs, setUploadingDocs] = useState<UploadingDocItem[]>([]);
+
+  // Drag & Drop / Direct Upload Handler with Live Progress on File Cards
+  const handleDropUploadFiles = async (targetFolderId: string | null | undefined, files: File[]) => {
+    if (!files || files.length === 0) return;
+    const folderIdToUse = targetFolderId ? targetFolderId : currentFolderId;
+
+    for (const file of files) {
+      const docId = `doc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      let docType: DocumentItem['type'] = 'pdf';
+      if (['doc', 'docx', 'txt', 'rtf'].includes(ext)) docType = 'doc';
+      else if (['xls', 'xlsx', 'csv'].includes(ext)) docType = 'sheet';
+      else if (['ppt', 'pptx'].includes(ext)) docType = 'presentation';
+      else if (['pdf'].includes(ext)) docType = 'pdf';
+
+      const uploadingItem: UploadingDocItem = {
+        id: docId,
+        name: file.name,
+        size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+        type: docType,
+        folderId: folderIdToUse,
+        progress: 5,
+      };
+
+      setUploadingDocs((prev) => [...prev, uploadingItem]);
+
+      let fileUrl = '';
+      let publicId = '';
+
+      try {
+        const cloudRes = await uploadFileToCloudinary(file, {
+          folderId: folderIdToUse,
+          docId: docId,
+          currentUserProfile: activeUserProfile || currentUser,
+          onProgress: (percent) => {
+            setUploadingDocs((prev) =>
+              prev.map((item) => (item.id === docId ? { ...item, progress: percent } : item))
+            );
+          },
+        });
+
+        if (cloudRes && cloudRes.url) {
+          fileUrl = cloudRes.url;
+          publicId = cloudRes.public_id;
+        }
+      } catch (err) {
+        console.warn('Direct upload Cloudinary fallback:', err);
+      }
+
+      setUploadingDocs((prev) => prev.filter((item) => item.id !== docId));
+
+      const now = new Date();
+      const dateFormatted = now.toLocaleDateString('en-US', {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+
+      const newDoc: DocumentItem = {
+        id: docId,
+        name: file.name,
+        dateAdded: dateFormatted,
+        rawDate: now.toISOString(),
+        author: {
+          name: currentUser.name || 'User',
+          initial: (currentUser.name || 'U')[0].toUpperCase(),
+          bgColor: 'bg-blue-600',
+        },
+        uploadedBy: activeUserProfile?.id || currentUser.id || null,
+        folderId: folderIdToUse,
+        size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+        type: docType,
+        tag: 'normal',
+        url: fileUrl,
+        fileUrl: fileUrl,
+        cloudinaryPublicId: publicId,
+        mimeType: file.type || 'application/pdf',
+        originalFilename: file.name,
+      };
+
+      handleAddDocument(newDoc);
+      if (fileUrl) {
+        try {
+          await saveDocumentWithCloudinary(newDoc);
+          console.log(`Successfully saved document ${docId} to Supabase database.`);
+        } catch (dbErr: any) {
+          console.error('Supabase database save error for drag & drop file:', dbErr);
+          showToast(`Uploaded to storage, but database save notice: ${dbErr.message || 'Check database connectivity'}`);
+        }
+      }
+    }
+  };
+
   // Butter-Smooth Glitch Protection Splash Loading State
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [fadeSplashOut, setFadeSplashOut] = useState(false);
@@ -329,28 +491,76 @@ export default function App() {
   // Supabase Auth Listener
   useEffect(() => {
     const syncUserProfile = async (user: any) => {
-      setIsAuthenticated(true);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('cec_drive_authenticated', 'true');
+      // 1. Verify user exists on Supabase Auth server
+      try {
+        const { data: authUserData, error: authErr } = await supabase.auth.getUser();
+        if (authErr || !authUserData?.user) {
+          console.warn('User session invalid or user deleted from Auth server.');
+          await handleLogout();
+          showToast('Session expired or account no longer exists.');
+          return;
+        }
+      } catch (authCheckErr) {
+        // network offline fallback
       }
+
       const meta = user.user_metadata || {};
-      
-      let effectiveRole: UserRole = (meta.role as UserRole) || 'student';
+      const userEmail = user.email || '';
+      let effectiveRole: UserRole | undefined = undefined;
       let dbName = meta.name;
+      let profileFoundInDb = false;
 
       try {
-        const { data: dbProfile } = await supabase
+        const { data: dbProfiles } = await supabase
           .from('profiles')
-          .select('role, name, department, section')
-          .eq('id', user.id)
-          .maybeSingle();
+          .select('id, role, name, department, section, email')
+          .or(`id.eq.${user.id},email.ilike.${userEmail}`);
+
+        const dbProfile = dbProfiles && dbProfiles.length > 0 ? dbProfiles[0] : null;
 
         if (dbProfile) {
-          if (dbProfile.role) effectiveRole = dbProfile.role as UserRole;
+          profileFoundInDb = true;
+          if (dbProfile.role) effectiveRole = normalizeUserRole(dbProfile.role);
           if (dbProfile.name) dbName = dbProfile.name;
         }
       } catch (e) {
         console.warn('Failed to fetch role/profile from profiles table:', e);
+      }
+
+      // If user profile row was deleted from profiles table (and not superadmin), force sign out immediately
+      if (!profileFoundInDb && user.email?.toLowerCase() !== 'admin@cec.edu.in') {
+        console.warn('User profile row deleted from database. Force signing out...');
+        await handleLogout();
+        showToast('Your account was deleted from the database.');
+        return;
+      }
+
+      // Check saved local role override if present
+      let overrideRole: UserRole | undefined = undefined;
+      if (typeof window !== 'undefined') {
+        const savedOverride =
+          localStorage.getItem(`cec_drive_role_override_${user.id}`) ||
+          localStorage.getItem(`cec_drive_role_override_${userEmail}`);
+        if (savedOverride) overrideRole = normalizeUserRole(savedOverride);
+      }
+
+      if (overrideRole) {
+        effectiveRole = overrideRole;
+      } else if (!effectiveRole) {
+        if (user.email?.toLowerCase() === 'admin@cec.edu.in' || user.email?.toLowerCase().includes('admin')) {
+          effectiveRole = 'admin';
+        } else if (meta.role) {
+          effectiveRole = normalizeUserRole(meta.role);
+        }
+      }
+
+      // Check saved local profile role if database did not specify
+      if (!effectiveRole && activeUserProfile?.role) {
+        effectiveRole = activeUserProfile.role;
+      }
+
+      if (!effectiveRole) {
+        effectiveRole = 'student';
       }
 
       setCurrentRole(effectiveRole);
@@ -465,7 +675,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      // Scope sign-out strictly to the local device browser session (does not invalidate PC session)
+      // Scope sign-out strictly to the local device browser session
       await supabase.auth.signOut({ scope: 'local' });
     } catch (err) {
       console.error('Supabase sign out error:', err);
@@ -475,6 +685,15 @@ export default function App() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('cec_drive_authenticated', 'false');
       localStorage.removeItem('cec_drive_active_user_profile');
+      try {
+        Object.keys(localStorage).forEach((key) => {
+          if (key.startsWith('sb-') && key.includes('auth-token')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (e) {
+        // ignore storage errors
+      }
     }
   };
 
@@ -705,32 +924,85 @@ export default function App() {
   useEffect(() => {
     async function fetchSupabaseData() {
       try {
-        const { data: remoteDocs, error: docErr } = await supabase.from('documents').select('*');
-        if (!docErr && remoteDocs && remoteDocs.length > 0) {
-          const normalizedDocs: DocumentItem[] = remoteDocs.map((d: any) => ({
-            id: d.id,
-            name: d.name,
-            dateAdded: d.dateAdded || d.date_added || 'Recently',
-            rawDate: d.rawDate || d.raw_date || '2026-09-30',
-            author: d.author || {
-              name: d.author_name || 'Academic Staff',
-              initial: (d.author_name || 'A')[0] || 'A',
-              bgColor: 'bg-blue-600',
-            },
-            folderId: d.folderId !== undefined ? d.folderId : (d.folder_id !== undefined ? d.folder_id : null),
-            size: d.size || '0 MB',
-            type: d.type || 'pdf',
-            tag: d.tag || 'normal',
-            starred: d.starred || false,
-            fileUrl: d.fileUrl || d.file_url || d.cloudinary_url || d.url || undefined,
-            cloudinaryPublicId: d.cloudinaryPublicId || d.cloudinary_public_id || undefined,
-            mimeType: d.mimeType || d.mime_type || undefined,
-            originalFilename: d.originalFilename || d.original_filename || undefined,
-            isDeleted: d.is_deleted || d.isDeleted || false,
-            deletedAt: d.deleted_at || d.deletedAt || undefined,
-            deletedBy: d.deleted_by || d.deletedBy || undefined,
-          }));
+        const localDeletedDocIds = getLocalDeletedDocIds();
+        const localDeletedFolderIds = getLocalDeletedFolderIds();
+
+        // Query both public.files and public.documents tables
+        const [filesRes, docsRes] = await Promise.all([
+          supabase.from('files').select('*'),
+          supabase.from('documents').select('*'),
+        ]);
+
+        const filesMap = new Map<string, any>();
+        if (!filesRes.error && filesRes.data) {
+          filesRes.data.forEach((f: any) => filesMap.set(f.id, f));
+        }
+
+        const remoteDocs = docsRes.data || [];
+        if (remoteDocs.length > 0 || filesMap.size > 0) {
+          const allDocIds = new Set([
+            ...remoteDocs.map((d: any) => d.id),
+            ...Array.from(filesMap.keys()),
+          ]);
+
+          const normalizedDocs: DocumentItem[] = Array.from(allDocIds).map((id) => {
+            const docRec = remoteDocs.find((d: any) => d.id === id) || {};
+            const fileRec = filesMap.get(id) || {};
+
+            const resolvedUrl =
+              fileRec.cloudinary_url ||
+              docRec.file_url ||
+              docRec.cloudinary_url ||
+              docRec.fileUrl ||
+              docRec.url ||
+              undefined;
+
+            const name = docRec.name || fileRec.name || fileRec.original_filename || 'Untitled Document';
+            const isSoftDeleted =
+              Boolean(docRec.is_deleted) ||
+              Boolean(fileRec.is_deleted) ||
+              Boolean(docRec.isDeleted) ||
+              localDeletedDocIds.has(id) ||
+              localDeletedDocIds.has(name) ||
+              false;
+
+            return {
+              id,
+              name,
+              dateAdded: docRec.dateAdded || docRec.date_added || 'Recently',
+              rawDate: docRec.rawDate || docRec.raw_date || new Date().toISOString(),
+              author: docRec.author || {
+                name: docRec.author_name || 'Academic Staff',
+                initial: (docRec.author_name || 'A')[0] || 'A',
+                bgColor: docRec.author_bg_color || 'bg-blue-600',
+              },
+              folderId:
+                docRec.folderId !== undefined
+                  ? docRec.folderId
+                  : docRec.folder_id !== undefined
+                  ? docRec.folder_id
+                  : fileRec.folder_id !== undefined
+                  ? fileRec.folder_id
+                  : null,
+              size: docRec.size || fileRec.file_size || '0 MB',
+              type: docRec.type || (fileRec.mime_type?.includes('pdf') ? 'pdf' : 'doc'),
+              tag: docRec.tag || 'normal',
+              starred: docRec.starred || false,
+              fileUrl: resolvedUrl,
+              cloudinaryPublicId:
+                fileRec.cloudinary_public_id || docRec.cloudinary_public_id || undefined,
+              mimeType: fileRec.mime_type || docRec.mimeType || undefined,
+              originalFilename:
+                fileRec.original_filename || docRec.originalFilename || docRec.name || undefined,
+              isDeleted: isSoftDeleted,
+              deletedAt: docRec.deleted_at || docRec.deletedAt || fileRec.deleted_at || (isSoftDeleted ? new Date().toISOString() : undefined),
+              deletedBy: docRec.deleted_by || docRec.deletedBy || fileRec.deleted_by || (isSoftDeleted ? 'Admin' : undefined),
+            };
+          });
+
           setDocuments(deduplicateDocuments(normalizedDocs));
+        } else {
+          setDocuments([]);
         }
 
         // 1. Ensure initial folder structure exists in Supabase to support foreign key constraints
@@ -750,16 +1022,25 @@ export default function App() {
 
         const { data: remoteFolders, error: folderErr } = await supabase.from('folders').select('*');
         if (!folderErr && remoteFolders && remoteFolders.length > 0) {
-          const normalizedFolders: FolderItem[] = remoteFolders.map((f: any) => ({
-            id: f.id,
-            name: f.name,
-            parentId: f.parentId !== undefined ? f.parentId : (f.parent_id !== undefined ? f.parent_id : null),
-            fileCount: f.fileCount ?? f.file_count ?? 0,
-            totalSize: f.totalSize ?? f.total_size ?? '0 MB',
-            isDeleted: f.is_deleted || f.isDeleted || false,
-            deletedAt: f.deleted_at || f.deletedAt || undefined,
-            deletedBy: f.deleted_by || f.deletedBy || undefined,
-          }));
+          const normalizedFolders: FolderItem[] = remoteFolders.map((f: any) => {
+            const isSoftDeleted =
+              Boolean(f.is_deleted) ||
+              Boolean(f.isDeleted) ||
+              localDeletedFolderIds.has(f.id) ||
+              localDeletedFolderIds.has(f.name) ||
+              false;
+
+            return {
+              id: f.id,
+              name: f.name,
+              parentId: f.parentId !== undefined ? f.parentId : (f.parent_id !== undefined ? f.parent_id : null),
+              fileCount: f.fileCount ?? f.file_count ?? 0,
+              totalSize: f.totalSize ?? f.total_size ?? '0 MB',
+              isDeleted: isSoftDeleted,
+              deletedAt: f.deleted_at || f.deletedAt || (isSoftDeleted ? new Date().toISOString() : undefined),
+              deletedBy: f.deleted_by || f.deletedBy || (isSoftDeleted ? 'Admin' : undefined),
+            };
+          });
           setFolders((prevLocal) => {
             const remoteIds = new Set(normalizedFolders.map((nf) => nf.id));
             const localOnlyFolders = prevLocal.filter((lf) => !remoteIds.has(lf.id));
@@ -769,17 +1050,60 @@ export default function App() {
 
         const { data: remoteProfiles } = await supabase.from('profiles').select('*');
         if (remoteProfiles && remoteProfiles.length > 0) {
-          const loadedUsers: UserProfile[] = remoteProfiles.map((p: any) => ({
-            id: p.id,
-            email: p.email || '',
-            name: p.name || (p.email ? p.email.split('@')[0] : 'User'),
-            role: (p.role as UserRole) || 'student',
-            department: p.department || 'CSE',
-            section: p.section || 'Sec A',
-            initial: ((p.name || p.email || 'U')[0]).toUpperCase(),
-            bgColor: p.role === 'admin' ? 'bg-purple-600' : p.role === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
-          }));
+          const loadedUsers: UserProfile[] = remoteProfiles.map((p: any) => {
+            const normalizedRole = normalizeUserRole(p.role) || 'student';
+            return {
+              id: p.id,
+              email: p.email || '',
+              name: p.name || (p.email ? p.email.split('@')[0] : 'User'),
+              role: normalizedRole,
+              department: p.department || 'CSE',
+              section: p.section || 'Sec A',
+              initial: ((p.name || p.email || 'U')[0]).toUpperCase(),
+              bgColor: normalizedRole === 'admin' ? 'bg-purple-600' : normalizedRole === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
+            };
+          });
           setUsers(loadedUsers);
+
+          // Realtime cross-device sync: Sync active user role directly from database if updated
+          if (activeUserProfile?.id || activeUserProfile?.email) {
+            const activeProfileFromDb = remoteProfiles.find(
+              (p: any) =>
+                (activeUserProfile.id && p.id === activeUserProfile.id) ||
+                (activeUserProfile.email && p.email && p.email.toLowerCase() === activeUserProfile.email.toLowerCase())
+            );
+
+            if (!activeProfileFromDb && activeUserProfile.email?.toLowerCase() !== 'admin@cec.edu.in') {
+              console.warn('Active user profile no longer exists in remote database. Logging out...');
+              await handleLogout();
+              showToast('Your account was deleted from the database.');
+              return;
+            }
+
+            if (activeProfileFromDb && activeProfileFromDb.role) {
+              let freshRole = normalizeUserRole(activeProfileFromDb.role);
+              if (typeof window !== 'undefined' && activeUserProfile) {
+                const savedOverride =
+                  localStorage.getItem(`cec_drive_role_override_${activeUserProfile.id}`) ||
+                  localStorage.getItem(`cec_drive_role_override_${activeUserProfile.email}`);
+                if (savedOverride) freshRole = normalizeUserRole(savedOverride);
+              }
+
+              if (freshRole && freshRole !== currentRole) {
+                setCurrentRole(freshRole);
+                const updatedActiveProfile: UserProfile = {
+                  ...activeUserProfile,
+                  role: freshRole,
+                  name: activeProfileFromDb.name || activeUserProfile.name,
+                  bgColor: freshRole === 'admin' ? 'bg-purple-600' : freshRole === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
+                };
+                setActiveUserProfile(updatedActiveProfile);
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('cec_drive_active_user_profile', JSON.stringify(updatedActiveProfile));
+                }
+              }
+            }
+          }
 
           // Real-time cross-device sync: Sync active user's pinned_folders directly from user_folder_pins table
           if (activeUserProfile?.id) {
@@ -892,6 +1216,13 @@ export default function App() {
           fetchSupabaseData();
         }
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'files' }, (payload: any) => {
+        if (payload.eventType === 'DELETE' && payload.old) {
+          setDocuments((prev) => prev.filter((d) => d.id !== payload.old.id));
+        } else {
+          fetchSupabaseData();
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, (payload: any) => {
         if (payload.eventType === 'INSERT' && payload.new) {
           const newD = payload.new;
@@ -945,7 +1276,21 @@ export default function App() {
           fetchSupabaseData();
         }
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, async (payload: any) => {
+        if (payload.eventType === 'DELETE' && payload.old) {
+          const deletedId = payload.old.id;
+          const deletedEmail = payload.old.email;
+          if (
+            activeUserProfile &&
+            ((deletedId && activeUserProfile.id === deletedId) ||
+              (deletedEmail && activeUserProfile.email && activeUserProfile.email.toLowerCase() === deletedEmail.toLowerCase()))
+          ) {
+            console.warn('Realtime profile deletion detected for logged-in user. Force logging out...');
+            await handleLogout();
+            showToast('Your account was deleted by an administrator.');
+            return;
+          }
+        }
         fetchSupabaseData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
@@ -972,8 +1317,33 @@ export default function App() {
   };
 
   // Switch role handler
-  const handleSwitchRole = (newRole: UserRole) => {
+  const handleSwitchRole = async (newRole: UserRole) => {
     setCurrentRole(newRole);
+
+    if (activeUserProfile) {
+      const updatedProfile: UserProfile = {
+        ...activeUserProfile,
+        role: newRole,
+        bgColor: newRole === 'admin' ? 'bg-purple-600' : newRole === 'uploader' ? 'bg-amber-600' : 'bg-blue-600',
+      };
+      setActiveUserProfile(updatedProfile);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('cec_drive_active_user_profile', JSON.stringify(updatedProfile));
+        if (activeUserProfile.id) localStorage.setItem(`cec_drive_role_override_${activeUserProfile.id}`, newRole);
+        if (activeUserProfile.email) localStorage.setItem(`cec_drive_role_override_${activeUserProfile.email}`, newRole);
+      }
+
+      try {
+        if (isValidUUID(activeUserProfile.id)) {
+          await supabase.from('profiles').update({ role: newRole }).eq('id', activeUserProfile.id);
+        } else if (activeUserProfile.email) {
+          await supabase.from('profiles').update({ role: newRole }).ilike('email', activeUserProfile.email);
+        }
+      } catch (err) {
+        console.warn('Failed to persist switched role to Supabase profiles:', err);
+      }
+    }
+
     if (newRole === 'admin') {
       setActiveNav('admin-panel');
     } else if (newRole === 'uploader') {
@@ -981,7 +1351,7 @@ export default function App() {
     } else {
       setActiveNav('dashboard');
     }
-    showToast(`Switched control panel view to ${newRole.toUpperCase()} mode`);
+    showToast(`Switched user role to ${newRole.toUpperCase()}`);
   };
 
   // User Management Handlers for Admin
@@ -1000,6 +1370,8 @@ export default function App() {
       setActiveUserProfile(updatedProfile);
       if (typeof window !== 'undefined') {
         localStorage.setItem('cec_drive_active_user_profile', JSON.stringify(updatedProfile));
+        localStorage.setItem(`cec_drive_role_override_${userId}`, newRole);
+        if (activeUserProfile.email) localStorage.setItem(`cec_drive_role_override_${activeUserProfile.email}`, newRole);
       }
     }
 
@@ -1021,9 +1393,18 @@ export default function App() {
     showToast(`Added new user "${newUser.name}"`);
   };
 
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     setUsers((prev) => prev.filter((u) => u.id !== userId));
-    showToast('User removed');
+    try {
+      if (isValidUUID(userId)) {
+        await supabase.from('profiles').delete().eq('id', userId);
+      } else {
+        await supabase.from('profiles').delete().eq('email', userId);
+      }
+    } catch (e) {
+      console.warn('Failed to delete user profile from DB:', e);
+    }
+    showToast('User account deleted');
   };
 
   // Helper to recursively get all subfolder IDs under a folder
@@ -1175,22 +1556,31 @@ export default function App() {
 
   // Folder Explorer Logic Actions
   const handleCreateFolder = async (name: string, parentId: string | null) => {
+    const targetParentId = parentId || null;
+    const existingFolderNames = folders
+      .filter((f) => (f.parentId ?? null) === targetParentId && !f.isDeleted)
+      .map((f) => f.name);
+
+    const uniqueFolderName = getUniqueItemName(name || 'New folder', existingFolderNames, false);
+
     const newFolder: FolderItem = {
       id: `folder-${Date.now()}`,
-      name,
-      parentId,
+      name: uniqueFolderName,
+      parentId: targetParentId,
       fileCount: 0,
       totalSize: '0 MB',
     };
+
     setFolders((prev) => [...prev, newFolder]);
-    showToast(`Created folder "${name}"`);
+    setEditingFolderId(newFolder.id);
+    showToast(`Created folder "${uniqueFolderName}"`);
 
     // Sync to Supabase with schema fallbacks
     try {
       const fullFolderPayload: any = {
         id: newFolder.id,
         name: newFolder.name,
-        parent_id: parentId || null,
+        parent_id: targetParentId,
         file_count: 0,
         total_size: '0 MB',
         is_deleted: false,
@@ -1201,7 +1591,7 @@ export default function App() {
         const minimalFolderPayload: any = {
           id: newFolder.id,
           name: newFolder.name,
-          parent_id: parentId || null,
+          parent_id: targetParentId,
         };
         const { error: minErr } = await supabase.from('folders').upsert([minimalFolderPayload], { onConflict: 'id' });
         if (minErr) {
@@ -1214,13 +1604,58 @@ export default function App() {
   };
 
   const handleRenameFolder = async (folderId: string, newName: string) => {
+    const targetFolder = folders.find((f) => f.id === folderId);
+    const parentId = targetFolder ? (targetFolder.parentId ?? null) : null;
+
+    const existingFolderNames = folders
+      .filter((f) => f.id !== folderId && (f.parentId ?? null) === parentId && !f.isDeleted)
+      .map((f) => f.name);
+
+    const uniqueFolderName = getUniqueItemName(newName || 'New folder', existingFolderNames, false);
+
     setFolders((prev) =>
-      prev.map((f) => (f.id === folderId ? { ...f, name: newName } : f))
+      prev.map((f) => (f.id === folderId ? { ...f, name: uniqueFolderName } : f))
     );
-    showToast(`Renamed folder to "${newName}"`);
+    if (editingFolderId === folderId) {
+      setEditingFolderId(null);
+    }
+    showToast(`Renamed folder to "${uniqueFolderName}"`);
 
     try {
-      await supabase.from('folders').update({ name: newName }).eq('id', folderId);
+      if (isValidUUID(folderId)) {
+        await supabase.from('folders').update({ name: uniqueFolderName }).eq('id', folderId);
+      }
+      if (targetFolder && targetFolder.name) {
+        await supabase.from('folders').update({ name: uniqueFolderName }).eq('name', targetFolder.name);
+      }
+    } catch (e) {
+      // ignore offline fallback
+    }
+  };
+
+  const handleRenameDoc = async (docId: string, newName: string) => {
+    const doc = documents.find((d) => d.id === docId);
+    const folderId = doc ? (doc.folderId ?? null) : null;
+
+    const existingDocNames = documents
+      .filter((d) => d.id !== docId && (d.folderId ?? null) === folderId && !d.isDeleted)
+      .map((d) => d.name);
+
+    const uniqueDocName = getUniqueItemName(newName || 'Untitled File', existingDocNames, true);
+
+    setDocuments((prev) =>
+      prev.map((d) => (d.id === docId ? { ...d, name: uniqueDocName } : d))
+    );
+    showToast(`Renamed file to "${uniqueDocName}"`);
+
+    try {
+      if (isValidUUID(docId)) {
+        await supabase.from('documents').update({ name: uniqueDocName }).eq('id', docId);
+        await supabase.from('files').update({ original_filename: uniqueDocName }).eq('id', docId);
+      }
+      if (doc && doc.name) {
+        await supabase.from('documents').update({ name: uniqueDocName }).eq('name', doc.name);
+      }
     } catch (e) {
       // ignore offline fallback
     }
@@ -1248,6 +1683,7 @@ export default function App() {
     try {
       await supabase.from('folders').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('id', idsToSoftDelete);
       await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('folder_id', idsToSoftDelete);
+      await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('folder_id', idsToSoftDelete);
     } catch (e) {
       // ignore offline fallback
     }
@@ -1259,6 +1695,62 @@ export default function App() {
     );
     const targetFolder = folders.find((f) => f.id === targetFolderId);
     showToast(`Moved file to ${targetFolder ? `"${targetFolder.name}"` : 'Folders'}`);
+  };
+
+  const handleDropItemToFolder = async (targetFolderId: string | null, itemType: 'document' | 'folder', itemId: string) => {
+    if (!canUserModifyFolder) {
+      showToast('Permission denied: Only Admin and Uploader can move items.');
+      return;
+    }
+
+    const targetFolder = targetFolderId ? folders.find((f) => f.id === targetFolderId) : null;
+    const targetName = targetFolder ? `"${targetFolder.name}"` : 'Folders';
+
+    if (itemType === 'document') {
+      const docToMove = documents.find((d) => d.id === itemId);
+      if (!docToMove) return;
+      if ((docToMove.folderId ?? null) === targetFolderId) return;
+
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === itemId ? { ...d, folderId: targetFolderId } : d))
+      );
+      showToast(`Moved "${docToMove.name}" to ${targetName}`);
+
+      try {
+        if (isValidUUID(itemId)) {
+          await supabase.from('documents').update({ folder_id: targetFolderId }).eq('id', itemId);
+          await supabase.from('files').update({ folder_id: targetFolderId }).eq('id', itemId);
+        }
+      } catch (err) {
+        console.warn('Failed to update document folder_id in Supabase:', err);
+      }
+    } else if (itemType === 'folder') {
+      const folderToMove = folders.find((f) => f.id === itemId);
+      if (!folderToMove) return;
+      if (itemId === targetFolderId) return;
+      if ((folderToMove.parentId ?? null) === targetFolderId) return;
+
+      if (targetFolderId) {
+        const subfolderIds = getAllSubfolderIds(itemId, folders);
+        if (subfolderIds.includes(targetFolderId)) {
+          showToast('Cannot move a folder into one of its own subfolders.');
+          return;
+        }
+      }
+
+      setFolders((prev) =>
+        prev.map((f) => (f.id === itemId ? { ...f, parentId: targetFolderId } : f))
+      );
+      showToast(`Moved folder "${folderToMove.name}" to ${targetName}`);
+
+      try {
+        if (isValidUUID(itemId)) {
+          await supabase.from('folders').update({ parent_id: targetFolderId }).eq('id', itemId);
+        }
+      } catch (err) {
+        console.warn('Failed to update folder parent_id in Supabase:', err);
+      }
+    }
   };
 
   const handleMoveSelectedDocsToFolder = (targetFolderId: string | null) => {
@@ -1388,7 +1880,8 @@ export default function App() {
 
   const handleBackgroundClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
-    if (target.closest('button, input, a, [role="button"], [role="checkbox"], .group')) {
+    // Don't deselect if clicking inside an interactive action button, form control, or specific card item
+    if (target.closest('button, input, select, textarea, a, [role="button"], [role="checkbox"], [data-card-item]')) {
       return;
     }
     if (selectedFolderIds.length > 0) {
@@ -1444,106 +1937,249 @@ export default function App() {
   const handleDeleteDoc = async (id: string, skipConfirm = false) => {
     const docToDelete = documents.find((d) => d.id === id);
     if (!docToDelete) return;
-    if (!skipConfirm && !confirm(`Are you sure you want to delete file "${docToDelete.name}"? It will be moved to the Admin Recycle Bin.`)) {
-      return;
+
+    const executeDelete = async () => {
+      const now = new Date().toISOString();
+      const userName = currentUser.name || currentUser.email || 'User';
+      const docName = docToDelete.name;
+
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, isDeleted: true, deletedAt: now, deletedBy: userName } : d))
+      );
+      setSelectedDocIds((prev) => prev.filter((item) => item !== id));
+
+      const deletedSet = getLocalDeletedDocIds();
+      deletedSet.add(id);
+      if (docName) deletedSet.add(docName);
+      saveLocalDeletedDocIds(deletedSet);
+
+      showToast(`Moved "${docName}" to Recycle Bin`);
+
+      try {
+        if (isValidUUID(id)) {
+          await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
+          await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
+        }
+        if (docName) {
+          await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('name', docName);
+          await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('original_filename', docName);
+          await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('name', docName);
+        }
+      } catch (e) {
+        console.warn('Supabase documents soft-delete warning:', e);
+      }
+
+      logActivity({
+        userId: currentUser.id || null,
+        userName,
+        action: 'DELETE',
+        fileId: id,
+        fileName: docName,
+        details: `Soft-deleted "${docName}" to Recycle Bin`,
+      });
+    };
+
+    if (skipConfirm) {
+      executeDelete();
+    } else {
+      setConfirmModalConfig({
+        isOpen: true,
+        title: 'Move to Recycle Bin?',
+        message: `Are you sure you want to delete file "${docToDelete.name}"? It will be moved to the Admin Recycle Bin.`,
+        itemName: docToDelete.name,
+        confirmText: 'Move to Bin',
+        variant: 'warning',
+        onConfirm: executeDelete,
+      });
     }
-    const now = new Date().toISOString();
-    const userName = currentUser.name || currentUser.email || 'User';
-
-    setDocuments((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, isDeleted: true, deletedAt: now, deletedBy: userName } : d))
-    );
-    setSelectedDocIds((prev) => prev.filter((item) => item !== id));
-    showToast(`Moved "${docToDelete.name}" to Recycle Bin`);
-
-    try {
-      await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
-    } catch (e) {
-      // ignore offline fallback
-    }
-
-    logActivity({
-      userId: currentUser.id || null,
-      userName,
-      action: 'DELETE',
-      fileId: id,
-      fileName: docToDelete.name,
-      details: `Soft-deleted "${docToDelete.name}" to Recycle Bin`,
-    });
   };
 
   // Restore and Permanent Purge Handlers for Admin Recycle Bin
   const handleRestoreDoc = async (docId: string) => {
     const doc = documents.find((d) => d.id === docId);
+    const docName = doc?.name || '';
+
     setDocuments((prev) =>
       prev.map((d) => (d.id === docId ? { ...d, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : d))
     );
-    showToast(`Restored file "${doc?.name || 'File'}"`);
+
+    const deletedSet = getLocalDeletedDocIds();
+    deletedSet.delete(docId);
+    if (docName) deletedSet.delete(docName);
+    saveLocalDeletedDocIds(deletedSet);
+
+    showToast(`Restored file "${docName || 'File'}"`);
+
     try {
-      await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
+      if (isValidUUID(docId)) {
+        await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
+        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
+      }
+      if (docName) {
+        await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', docName);
+        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('original_filename', docName);
+        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', docName);
+      }
     } catch (e) {}
   };
 
   const handleRestoreFolder = async (folderId: string) => {
     const folder = folders.find((f) => f.id === folderId);
-    const idsToRestore = [folderId, ...getAllSubfolderIds(folderId, folders)];
+    const folderName = folder?.name || '';
+
     setFolders((prev) =>
-      prev.map((f) => (idsToRestore.includes(f.id) ? { ...f, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : f))
+      prev.map((f) => (f.id === folderId ? { ...f, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : f))
     );
     setDocuments((prev) =>
-      prev.map((d) => (d.folderId && idsToRestore.includes(d.folderId) ? { ...d, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : d))
+      prev.map((d) => (d.folderId === folderId ? { ...d, isDeleted: false, deletedAt: undefined, deletedBy: undefined } : d))
     );
-    showToast(`Restored folder "${folder?.name || 'Folder'}"`);
+
+    const deletedFolderSet = getLocalDeletedFolderIds();
+    deletedFolderSet.delete(folderId);
+    if (folderName) deletedFolderSet.delete(folderName);
+    saveLocalDeletedFolderIds(deletedFolderSet);
+
+    showToast(`Restored folder "${folderName || 'Folder'}"`);
+
     try {
-      await supabase.from('folders').update({ is_deleted: false, deleted_at: null, deleted_by: null }).in('id', idsToRestore);
-      await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).in('folder_id', idsToRestore);
+      if (isValidUUID(folderId)) {
+        await supabase.from('folders').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', folderId);
+        await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('folder_id', folderId);
+        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('folder_id', folderId);
+      }
+      if (folderName) {
+        await supabase.from('folders').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', folderName);
+      }
     } catch (e) {}
   };
 
   const handlePermanentDeleteDoc = async (docId: string) => {
     const doc = documents.find((d) => d.id === docId);
-    if (!confirm(`Are you sure you want to PERMANENTLY delete file "${doc?.name || 'File'}"? This action cannot be undone.`)) {
-      return;
-    }
-    setDocuments((prev) => prev.filter((d) => d.id !== docId));
-    showToast(`Permanently deleted "${doc?.name || 'File'}"`);
-    try {
-      await supabase.from('documents').delete().eq('id', docId);
-    } catch (e) {}
+    const docName = doc?.name || '';
+
+    const executePurge = async () => {
+      setDocuments((prev) => prev.filter((d) => d.id !== docId));
+      setSelectedDocIds((prev) => prev.filter((id) => id !== docId));
+
+      const deletedSet = getLocalDeletedDocIds();
+      deletedSet.delete(docId);
+      if (docName) deletedSet.delete(docName);
+      saveLocalDeletedDocIds(deletedSet);
+
+      showToast(`Permanently deleted "${docName || 'File'}"`);
+
+      try {
+        if (isValidUUID(docId)) {
+          await supabase.from('documents').delete().eq('id', docId);
+          await supabase.from('files').delete().eq('id', docId);
+        }
+        if (docName) {
+          await supabase.from('documents').delete().eq('name', docName);
+          await supabase.from('files').delete().eq('original_filename', docName);
+          await supabase.from('files').delete().eq('name', docName);
+        }
+      } catch (e) {}
+    };
+
+    setConfirmModalConfig({
+      isOpen: true,
+      title: 'PERMANENTLY Delete File?',
+      message: `Are you sure you want to PERMANENTLY delete file "${docName || 'File'}"? This action cannot be undone.`,
+      itemName: docName,
+      confirmText: 'Delete Permanently',
+      variant: 'danger',
+      onConfirm: executePurge,
+    });
   };
 
   const handlePermanentDeleteFolder = async (folderId: string) => {
     const folder = folders.find((f) => f.id === folderId);
-    if (!confirm(`Are you sure you want to PERMANENTLY delete folder "${folder?.name || 'Folder'}" and all its contents? This action cannot be undone.`)) {
-      return;
-    }
-    const idsToPurge = [folderId, ...getAllSubfolderIds(folderId, folders)];
-    setFolders((prev) => prev.filter((f) => !idsToPurge.includes(f.id)));
-    setDocuments((prev) => prev.filter((d) => !d.folderId || !idsToPurge.includes(d.folderId)));
-    showToast(`Permanently deleted folder "${folder?.name || 'Folder'}"`);
-    try {
-      await supabase.from('folders').delete().in('id', idsToPurge);
-      await supabase.from('documents').delete().in('folder_id', idsToPurge);
-    } catch (e) {}
+    const folderName = folder?.name || '';
+
+    const executePurge = async () => {
+      setFolders((prev) => prev.filter((f) => f.id !== folderId));
+      setDocuments((prev) => prev.filter((d) => d.folderId !== folderId));
+      setSelectedFolderIds((prev) => prev.filter((id) => id !== folderId));
+
+      const deletedFolderSet = getLocalDeletedFolderIds();
+      deletedFolderSet.delete(folderId);
+      if (folderName) deletedFolderSet.delete(folderName);
+      saveLocalDeletedFolderIds(deletedFolderSet);
+
+      showToast(`Permanently deleted folder "${folderName || 'Folder'}"`);
+
+      try {
+        if (isValidUUID(folderId)) {
+          await supabase.from('folders').delete().eq('id', folderId);
+          await supabase.from('documents').delete().eq('folder_id', folderId);
+          await supabase.from('files').delete().eq('folder_id', folderId);
+        }
+        if (folderName) {
+          await supabase.from('folders').delete().eq('name', folderName);
+        }
+      } catch (e) {}
+    };
+
+    setConfirmModalConfig({
+      isOpen: true,
+      title: 'PERMANENTLY Delete Folder?',
+      message: `Are you sure you want to PERMANENTLY delete folder "${folderName || 'Folder'}"? This action cannot be undone.`,
+      itemName: folderName,
+      confirmText: 'Delete Permanently',
+      variant: 'danger',
+      onConfirm: executePurge,
+    });
   };
 
   const handleEmptyRecycleBin = async () => {
     const totalCount = deletedDocuments.length + deletedFolders.length;
     if (totalCount === 0) return;
-    if (!confirm(`Are you sure you want to PERMANENTLY delete ALL ${totalCount} items in the Recycle Bin? This action cannot be undone.`)) {
-      return;
-    }
-    const docIds = deletedDocuments.map((d) => d.id);
-    const folderIds = deletedFolders.map((f) => f.id);
 
-    setDocuments((prev) => prev.filter((d) => !d.isDeleted));
-    setFolders((prev) => prev.filter((f) => !f.isDeleted));
-    showToast(`Emptied Recycle Bin (Purged ${totalCount} items)`);
+    const executeEmpty = async () => {
+      const softDeletedDocs = documents.filter((d) => d.isDeleted);
+      const softDeletedFolders = folders.filter((f) => f.isDeleted);
 
-    try {
-      if (docIds.length > 0) await supabase.from('documents').delete().in('id', docIds);
-      if (folderIds.length > 0) await supabase.from('folders').delete().in('id', folderIds);
-    } catch (e) {}
+      setDocuments((prev) => prev.filter((d) => !d.isDeleted));
+      setFolders((prev) => prev.filter((f) => !f.isDeleted));
+
+      saveLocalDeletedDocIds(new Set());
+      saveLocalDeletedFolderIds(new Set());
+
+      showToast(`Emptied Recycle Bin (Purged ${totalCount} items)`);
+
+      try {
+        for (const doc of softDeletedDocs) {
+          if (isValidUUID(doc.id)) {
+            await supabase.from('documents').delete().eq('id', doc.id);
+            await supabase.from('files').delete().eq('id', doc.id);
+          }
+          if (doc.name) {
+            await supabase.from('documents').delete().eq('name', doc.name);
+            await supabase.from('files').delete().eq('original_filename', doc.name);
+            await supabase.from('files').delete().eq('name', doc.name);
+          }
+        }
+        for (const folder of softDeletedFolders) {
+          if (isValidUUID(folder.id)) {
+            await supabase.from('folders').delete().eq('id', folder.id);
+            await supabase.from('documents').delete().eq('folder_id', folder.id);
+            await supabase.from('files').delete().eq('folder_id', folder.id);
+          }
+          if (folder.name) {
+            await supabase.from('folders').delete().eq('name', folder.name);
+          }
+        }
+      } catch (e) {}
+    };
+
+    setConfirmModalConfig({
+      isOpen: true,
+      title: 'Empty Recycle Bin?',
+      message: `Are you sure you want to PERMANENTLY delete ALL ${totalCount} items in the Recycle Bin? This action cannot be undone.`,
+      confirmText: 'Empty Recycle Bin',
+      variant: 'danger',
+      onConfirm: executeEmpty,
+    });
   };
 
   const handleDownloadSelected = async () => {
@@ -1606,43 +2242,64 @@ export default function App() {
     }
   };
 
-  const handleDeleteSelected = async () => {
-    if (selectedFolderIds.length > 0) {
-      const count = selectedFolderIds.length;
-      if (!confirm(`Are you sure you want to delete ${count} selected folder(s)? They will be moved to the Admin Recycle Bin.`)) {
-        return;
-      }
+  const handleDeleteSelected = () => {
+    if (selectedFolderIds.length > 0 || selectedDocIds.length > 0 || currentFolderId !== null) {
+      setIsDeleteModalOpen(true);
+    }
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    const foldersCount = selectedFolderIds.length;
+    const docsCount = selectedDocIds.length;
+
+    if (foldersCount > 0) {
       const idsToDelete = [...selectedFolderIds];
       for (const id of idsToDelete) {
         await handleDeleteFolder(id, true);
       }
       setSelectedFolderIds([]);
-      return;
     }
 
-    if (selectedDocIds.length > 0) {
-      const count = selectedDocIds.length;
-      if (!confirm(`Are you sure you want to delete ${count} selected file(s)? They will be moved to the Admin Recycle Bin.`)) {
-        return;
-      }
+    if (docsCount > 0) {
       const idsToDelete = [...selectedDocIds];
       for (const id of idsToDelete) {
         await handleDeleteDoc(id, true);
       }
       setSelectedDocIds([]);
     }
+
+    if (foldersCount === 0 && docsCount === 0 && currentFolderId) {
+      const folderToDelete = folders.find((f) => f.id === currentFolderId);
+      await handleDeleteFolder(currentFolderId, true);
+      const parentIndex = breadcrumbs.length - 2;
+      const parentId = parentIndex >= 0 ? breadcrumbs[parentIndex].id : null;
+      setCurrentFolderId(parentId);
+      showToast(`Moved folder "${folderToDelete?.name || 'Folder'}" to Recycle Bin`);
+      return;
+    }
+
+    let toastMsg = 'Moved items to Recycle Bin';
+    if (foldersCount > 0 && docsCount > 0) {
+      toastMsg = `Moved ${foldersCount} folder(s) and ${docsCount} file(s) to Recycle Bin`;
+    } else if (foldersCount > 0) {
+      toastMsg = `Moved ${foldersCount} folder(s) to Recycle Bin`;
+    } else if (docsCount > 0) {
+      toastMsg = `Moved ${docsCount} file(s) to Recycle Bin`;
+    }
+    showToast(toastMsg);
   };
 
-  const handleAddDocument = async (newDoc: DocumentItem) => {
-    setDocuments((prev) => deduplicateDocuments([newDoc, ...prev]));
-    showToast(`Document "${newDoc.name}" published`);
+  const handleAddDocument = (newDoc: DocumentItem) => {
+    const targetFolderId = newDoc.folderId ?? currentFolderId;
+    const existingDocNames = documents
+      .filter((d) => (d.folderId ?? null) === (targetFolderId ?? null) && !d.isDeleted && d.id !== newDoc.id)
+      .map((d) => d.name);
 
-    // Sync to Supabase
-    try {
-      await supabase.from('documents').insert([newDoc]);
-    } catch (e) {
-      // offline fallback
-    }
+    const uniqueDocName = getUniqueItemName(newDoc.name || 'Untitled File', existingDocNames, true);
+    const docWithUniqueName = { ...newDoc, name: uniqueDocName };
+
+    setDocuments((prev) => deduplicateDocuments([docWithUniqueName, ...prev]));
+    showToast(`Document "${uniqueDocName}" published`);
   };
 
   const handleToggleStar = (id: string) => {
@@ -1665,7 +2322,17 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-sans transition-colors duration-200">
+    <div
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        if (!canUserModifyFolder) return;
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          handleDropUploadFiles(currentFolderId, Array.from(e.dataTransfer.files));
+        }
+      }}
+      className="flex h-screen w-screen overflow-hidden bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-sans transition-colors duration-200 relative"
+    >
       {/* Desktop Sidebar */}
       <div className="hidden md:flex h-full shrink-0">
         <Sidebar
@@ -1683,6 +2350,7 @@ export default function App() {
           onNavigateFolder={setCurrentFolderId}
           notifications={notifications}
           deletedCount={deletedDocuments.length + deletedFolders.length}
+          onDropFiles={handleDropUploadFiles}
         />
       </div>
 
@@ -1731,9 +2399,9 @@ export default function App() {
       </div>
 
       {/* Main Viewport Content Area */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-black focus:outline-none">
+      <main className="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-[#191919] focus:outline-none">
         {/* Top Header */}
-        <header className="flex items-center justify-between px-4 sm:px-6 md:px-8 h-16 border-b border-neutral-100 dark:border-neutral-900/60 bg-white/80 dark:bg-black/80 backdrop-blur-sm shrink-0 min-w-0 gap-3">
+        <header className="flex items-center justify-between px-4 sm:px-6 md:px-8 h-16 border-b border-neutral-100 dark:border-[#2a2a2a] bg-white/80 dark:bg-[#191919]/90 backdrop-blur-sm shrink-0 min-w-0 gap-3">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 overflow-hidden">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -1838,7 +2506,9 @@ export default function App() {
         {/* Scrollable Main Content Container */}
         <div
           onClick={handleBackgroundClick}
-          className="flex-1 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 pb-24 sm:py-7 space-y-6 sm:space-y-8"
+          className={`flex-1 overflow-y-auto pb-24 ${
+            activeNav === 'documents' || activeNav === 'pinned-folders' ? 'px-0 pt-0 space-y-4' : 'px-4 sm:px-6 md:px-8 pt-5 sm:py-7 space-y-6 sm:space-y-8'
+          }`}
         >
           {(activeNav as string) === 'profile' ? (
             <ProfileView
@@ -1879,7 +2549,7 @@ export default function App() {
           ) : activeNav === 'calendar' ? (
             <CalendarView />
           ) : activeNav === 'pinned-folders' ? (
-            <div className="space-y-6">
+            <div className="space-y-4">
               <FolderToolbar
                 currentFolderId={currentFolderId}
                 breadcrumbs={[
@@ -1918,21 +2588,27 @@ export default function App() {
                 onSearchChange={setSearchQuery}
                 canModify={canUserModifyFolder}
               />
-              <PinnedFoldersView
-                pinnedFolderIds={pinnedFolderIds}
-                folders={computedFolders}
-                selectedFolderIds={selectedFolderIds}
-                viewMode={viewMode}
-                sortField={sortField}
-                sortOrder={sortOrder}
-                searchQuery={searchQuery}
-                onNavigateFolder={(id) => {
-                  setCurrentFolderId(id);
-                  setActiveNav('documents');
-                }}
-                onTogglePinFolder={handleTogglePinFolder}
-                onToggleSelectFolder={handleToggleSelectFolder}
-              />
+              <div className="px-4 sm:px-6 md:px-8">
+                <PinnedFoldersView
+                  pinnedFolderIds={pinnedFolderIds}
+                  folders={computedFolders}
+                  selectedFolderIds={selectedFolderIds}
+                  viewMode={viewMode}
+                  sortField={sortField}
+                  sortOrder={sortOrder}
+                  searchQuery={searchQuery}
+                  onNavigateFolder={(id) => {
+                    setCurrentFolderId(id);
+                    setActiveNav('documents');
+                  }}
+                  onTogglePinFolder={handleTogglePinFolder}
+                  onToggleSelectFolder={handleToggleSelectFolder}
+                  onRenameFolder={handleRenameFolder}
+                  onDropFiles={handleDropUploadFiles}
+                  onDropItem={handleDropItemToFolder}
+                  canModify={canUserModifyFolder}
+                />
+              </div>
             </div>
           ) : activeNav === 'recent-files' ? (
             <RecentFilesView
@@ -1989,8 +2665,11 @@ export default function App() {
                 onSortFieldChange={setSortField}
                 onSortOrderChange={setSortOrder}
                 onSearchChange={setSearchQuery}
+                onDropItem={handleDropItemToFolder}
                 canModify={canUserModifyFolder}
               />
+
+              <div className="px-4 sm:px-6 md:px-8 space-y-4">
 
               {/* Title Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-2">
@@ -2024,15 +2703,20 @@ export default function App() {
                   </div>
 
                   {viewMode === 'grid' ? (
-                    <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 sm:gap-4">
+                    <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-0">
                       {activeSubfolders.map((folder) => (
                         <FolderCard
                           key={folder.id}
                           folder={folder}
                           isSelected={selectedFolderIds.includes(folder.id)}
                           hasActiveSelection={selectedFolderIds.length > 0}
+                          autoFocusEdit={editingFolderId === folder.id}
+                          canModify={canUserModifyFolder}
                           onToggleSelect={handleToggleSelectFolder}
                           onClick={handleFolderClick}
+                          onRenameFolder={handleRenameFolder}
+                          onDropFiles={handleDropUploadFiles}
+                          onDropItem={handleDropItemToFolder}
                         />
                       ))}
                     </div>
@@ -2041,6 +2725,7 @@ export default function App() {
                       folders={activeSubfolders}
                       selectedIds={selectedFolderIds}
                       hasActiveSelection={selectedFolderIds.length > 0}
+                      editingFolderId={editingFolderId}
                       onToggleSelect={handleToggleSelectFolder}
                       onFolderClick={handleFolderClick}
                       onDownloadFolder={(id) => {
@@ -2059,6 +2744,7 @@ export default function App() {
                         }
                       }}
                       onDeleteFolder={handleDeleteFolder}
+                      onDropItem={handleDropItemToFolder}
                       canModify={canUserModifyFolder}
                     />
                   )}
@@ -2078,7 +2764,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {filteredAndSortedDocuments.length === 0 ? (
+                {filteredAndSortedDocuments.length === 0 && uploadingDocs.filter(d => (d.folderId ?? null) === currentFolderId).length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-12 text-center rounded-2xl border border-dashed border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30">
                     <FolderIcon className="w-10 h-10 text-neutral-300 dark:text-neutral-700 mb-2" />
                     <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
@@ -2106,17 +2792,21 @@ export default function App() {
                 ) : (
                   <DocumentGrid
                     documents={filteredAndSortedDocuments}
+                    uploadingDocs={uploadingDocs.filter(d => (d.folderId ?? null) === currentFolderId)}
                     selectedIds={selectedDocIds}
                     hasActiveSelection={selectedDocIds.length > 0}
+                    canModify={canUserModifyFolder}
                     onToggleSelect={handleToggleSelectDoc}
                     onDocumentClick={(doc) => setPreviewDoc(doc)}
                     onDownload={handleDownloadDoc}
                     onDelete={canUserModifyFolder ? handleDeleteDoc : undefined}
+                    onRenameDoc={handleRenameDoc}
                   />
                 )}
               </section>
-            </>
-          )}
+            </div>
+          </>
+        )}
         </div>
       </main>
 
@@ -2133,11 +2823,7 @@ export default function App() {
         onMarkImportant={handleMarkImportant}
         onDeleteSelected={
           selectedFolderIds.length > 0
-            ? () => {
-                if (confirm(`Delete ${selectedFolderIds.length} selected folder(s)?`)) {
-                  selectedFolderIds.forEach((id) => handleDeleteFolder(id));
-                }
-              }
+            ? () => setIsDeleteModalOpen(true)
             : handleDeleteSelected
         }
         canDelete={canUserModifyFolder}
@@ -2172,6 +2858,33 @@ export default function App() {
         onSuccess={handleResetPasswordSuccess}
       />
 
+      {/* Unified Bulk Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={isDeleteModalOpen}
+        selectedFolders={computedFolders.filter((f) => selectedFolderIds.includes(f.id))}
+        selectedDocs={documents.filter((d) => selectedDocIds.includes(d.id))}
+        currentFolderToDelete={
+          selectedFolderIds.length === 0 && selectedDocIds.length === 0 && currentFolderId
+            ? folders.find((f) => f.id === currentFolderId)
+            : null
+        }
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={handleConfirmBulkDelete}
+      />
+
+      {/* Custom Permanent Delete / Purge / Action Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmModalConfig.isOpen}
+        title={confirmModalConfig.title}
+        message={confirmModalConfig.message}
+        itemName={confirmModalConfig.itemName}
+        confirmText={confirmModalConfig.confirmText}
+        cancelText={confirmModalConfig.cancelText}
+        variant={confirmModalConfig.variant}
+        onClose={() => setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModalConfig.onConfirm}
+      />
+
       {/* Mobile Bottom Navigation Bar */}
       <MobileBottomNav
         activeNav={activeNav}
@@ -2190,6 +2903,8 @@ export default function App() {
           <span>{toastMessage}</span>
         </div>
       )}
+
+
 
       {/* Glitch-Protection Butter-Smooth Splash Loading Overlay */}
       {isInitialLoading && (

@@ -7,11 +7,13 @@ interface FolderListProps {
   folders: FolderItem[];
   selectedIds: string[];
   hasActiveSelection?: boolean;
+  editingFolderId?: string | null;
   onToggleSelect: (id: string, multiSelect?: boolean) => void;
   onFolderClick: (folderId: string) => void;
   onDownloadFolder?: (folderId: string) => void;
-  onRenameFolder?: (folderId: string) => void;
+  onRenameFolder?: (folderId: string, newName?: string) => void;
   onDeleteFolder?: (folderId: string) => void;
+  onDropItem?: (targetFolderId: string, itemType: 'document' | 'folder', itemId: string) => void;
   canModify?: boolean;
 }
 
@@ -19,25 +21,62 @@ const FolderListItem: React.FC<{
   folder: FolderItem;
   isSelected: boolean;
   hasActiveSelection: boolean;
+  autoFocusEdit?: boolean;
   onToggleSelect: (id: string, multiSelect?: boolean) => void;
   onFolderClick: (folderId: string) => void;
   onDownloadFolder?: (folderId: string) => void;
-  onRenameFolder?: (folderId: string) => void;
+  onRenameFolder?: (folderId: string, newName?: string) => void;
   onDeleteFolder?: (folderId: string) => void;
+  onDropItem?: (targetFolderId: string, itemType: 'document' | 'folder', itemId: string) => void;
   canModify?: boolean;
 }> = ({
   folder,
   isSelected,
   hasActiveSelection,
+  autoFocusEdit = false,
   onToggleSelect,
   onFolderClick,
   onDownloadFolder,
   onRenameFolder,
   onDeleteFolder,
+  onDropItem,
   canModify = true,
 }) => {
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isLongPressTriggeredRef = useRef(false);
+
+  const [isEditing, setIsEditing] = React.useState(autoFocusEdit);
+  const [editName, setEditName] = React.useState(folder.name);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    setEditName(folder.name);
+  }, [folder.name]);
+
+  React.useEffect(() => {
+    if (autoFocusEdit) {
+      setIsEditing(true);
+    }
+  }, [autoFocusEdit]);
+
+  React.useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSaveRename = () => {
+    setIsEditing(false);
+    const trimmed = editName.trim();
+    if (onRenameFolder) {
+      if (trimmed) {
+        onRenameFolder(folder.id, trimmed);
+      } else {
+        onRenameFolder(folder.id, 'New folder');
+      }
+    }
+  };
 
   const handleTouchStart = () => {
     const isMobile = window.innerWidth < 768;
@@ -49,9 +88,7 @@ const FolderListItem: React.FC<{
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         try {
           navigator.vibrate(40);
-        } catch (e) {
-          // ignore vibration
-        }
+        } catch (e) {}
       }
       onToggleSelect(folder.id, true);
     }, 500);
@@ -90,10 +127,68 @@ const FolderListItem: React.FC<{
     }
   };
 
+  const [isDragOver, setIsDragOver] = React.useState(false);
+
+  const handleDragStart = (e: React.DragEvent) => {
+    if (!canModify) return;
+    const payload = JSON.stringify({ itemType: 'folder', id: folder.id });
+    e.dataTransfer.setData('application/json', payload);
+    e.dataTransfer.setData('text/plain', `folder:${folder.id}`);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canModify) return;
+    if (!isDragOver) setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canModify) return;
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canModify) return;
+    setIsDragOver(false);
+
+    try {
+      const jsonStr = e.dataTransfer.getData('application/json');
+      let payload: any = null;
+      if (jsonStr) {
+        payload = JSON.parse(jsonStr);
+      } else {
+        const plainStr = e.dataTransfer.getData('text/plain');
+        if (plainStr.startsWith('doc:')) {
+          payload = { itemType: 'document', id: plainStr.replace('doc:', '') };
+        } else if (plainStr.startsWith('folder:')) {
+          payload = { itemType: 'folder', id: plainStr.replace('folder:', '') };
+        }
+      }
+
+      if (payload && payload.id && onDropItem) {
+        if (payload.itemType === 'folder' && payload.id === folder.id) return;
+        onDropItem(folder.id, payload.itemType, payload.id);
+      }
+    } catch (err) {
+      console.warn('Failed to parse drag drop payload:', err);
+    }
+  };
+
   return (
     <tr
       role="row"
       aria-selected={isSelected}
+      draggable={canModify}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onTouchStart={handleTouchStart}
@@ -111,7 +206,9 @@ const FolderListItem: React.FC<{
         }
       }}
       className={`group transition-colors duration-150 cursor-pointer select-none ${
-        isSelected
+        isDragOver
+          ? 'bg-blue-100/90 dark:bg-blue-900/80 border-l-4 border-l-blue-600'
+          : isSelected
           ? 'bg-blue-100/70 dark:bg-blue-950/40 border-l-4 border-l-blue-600'
           : 'hover:bg-neutral-50 dark:hover:bg-neutral-900/40'
       }`}
@@ -120,9 +217,42 @@ const FolderListItem: React.FC<{
       <td className="py-3 pl-4 pr-3">
         <div className="flex items-center gap-3">
           <FolderIcon3D className="w-8 h-6.5 shrink-0 drop-shadow-2xs" />
-          <span className="text-sm font-semibold text-neutral-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-            {folder.name}
-          </span>
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={editName}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSaveRename();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsEditing(false);
+                  setEditName(folder.name);
+                }
+              }}
+              onBlur={handleSaveRename}
+              className="text-xs font-semibold bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border border-blue-500 rounded-none px-1 py-0.5 outline-none z-10"
+            />
+          ) : (
+            <span
+              onClick={(e) => {
+                if (isSelected && !isEditing) {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }
+              }}
+              className="text-sm font-semibold text-neutral-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors"
+            >
+              {folder.name}
+            </span>
+          )}
         </div>
       </td>
 
@@ -181,11 +311,13 @@ export const FolderList: React.FC<FolderListProps> = ({
   folders,
   selectedIds,
   hasActiveSelection = false,
+  editingFolderId = null,
   onToggleSelect,
   onFolderClick,
   onDownloadFolder,
   onRenameFolder,
   onDeleteFolder,
+  onDropItem,
   canModify = true,
 }) => {
   if (folders.length === 0) return null;
@@ -216,11 +348,13 @@ export const FolderList: React.FC<FolderListProps> = ({
               folder={folder}
               isSelected={selectedIds.includes(folder.id)}
               hasActiveSelection={hasActiveSelection}
+              autoFocusEdit={editingFolderId === folder.id}
               onToggleSelect={onToggleSelect}
               onFolderClick={onFolderClick}
               onDownloadFolder={onDownloadFolder}
               onRenameFolder={onRenameFolder}
               onDeleteFolder={onDeleteFolder}
+              onDropItem={onDropItem}
               canModify={canModify}
             />
           ))}

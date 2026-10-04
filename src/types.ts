@@ -1,5 +1,14 @@
 export type UserRole = 'admin' | 'uploader' | 'student';
 
+export function normalizeUserRole(roleStr?: string | null): UserRole | undefined {
+  if (!roleStr) return undefined;
+  const lower = roleStr.trim().toLowerCase();
+  if (['admin', 'administrator', 'superadmin'].includes(lower)) return 'admin';
+  if (['uploader', 'lecturer', 'teacher', 'staff', 'faculty', 'professor'].includes(lower)) return 'uploader';
+  if (['student', 'user', 'learner'].includes(lower)) return 'student';
+  return undefined;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -43,6 +52,7 @@ export interface DocumentItem {
   tag?: 'important' | 'normal';
   starred?: boolean;
   fileUrl?: string;
+  url?: string;
   cloudinaryPublicId?: string;
   resourceType?: string;
   mimeType?: string;
@@ -50,6 +60,15 @@ export interface DocumentItem {
   isDeleted?: boolean;
   deletedAt?: string;
   deletedBy?: string;
+}
+
+export interface UploadingDocItem {
+  id: string;
+  name: string;
+  size: string;
+  type: 'pdf' | 'doc' | 'sheet' | 'spec' | 'presentation';
+  folderId?: string | null;
+  progress: number;
 }
 
 export interface FolderItem {

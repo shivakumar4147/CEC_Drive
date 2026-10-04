@@ -52,6 +52,7 @@ interface FolderToolbarProps {
   onSortFieldChange: (field: SortField) => void;
   onSortOrderChange: (order: SortOrder) => void;
   onSearchChange?: (query: string) => void;
+  onDropItem?: (targetFolderId: string | null, itemType: 'document' | 'folder', itemId: string) => void;
   canModify?: boolean;
 }
 
@@ -80,6 +81,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
   onSortFieldChange,
   onSortOrderChange,
   onSearchChange,
+  onDropItem,
   canModify = true,
 }) => {
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
@@ -96,6 +98,21 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsNewMenuOpen(false);
+        setIsSortMenuOpen(false);
+        setIsViewMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const currentFolder = folders.find((f) => f.id === currentFolderId);
 
@@ -143,21 +160,15 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
   const isDeleteActive = selectedFolderIds.length > 0 || selectedDocIds.length > 0 || currentFolderId !== null;
 
   const handleDeleteCurrent = () => {
-    if (selectedFolderIds.length > 0) {
-      if (confirm(`Are you sure you want to delete ${selectedFolderIds.length} selected folder(s)?`)) {
-        selectedFolderIds.forEach((id) => onDeleteFolder(id));
-      }
-    } else if (selectedDocIds.length > 0) {
-      if (onDeleteSelected) {
-        onDeleteSelected();
-      }
+    if (onDeleteSelected) {
+      onDeleteSelected();
+    } else if (selectedFolderIds.length > 0) {
+      selectedFolderIds.forEach((id) => onDeleteFolder(id));
     } else if (currentFolderId) {
-      if (confirm(`Are you sure you want to delete folder "${currentFolder?.name}"?`)) {
-        onDeleteFolder(currentFolderId);
-        const parentIndex = breadcrumbs.length - 2;
-        const parentId = parentIndex >= 0 ? breadcrumbs[parentIndex].id : null;
-        onNavigateToFolder(parentId);
-      }
+      onDeleteFolder(currentFolderId);
+      const parentIndex = breadcrumbs.length - 2;
+      const parentId = parentIndex >= 0 ? breadcrumbs[parentIndex].id : null;
+      onNavigateToFolder(parentId);
     }
   };
 
@@ -167,10 +178,37 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
     setIsMoveModalOpen(false);
   };
 
+  const handleBreadcrumbDrop = (targetFolderId: string | null, e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canModify || !onDropItem) return;
+
+    try {
+      const jsonStr = e.dataTransfer.getData('application/json');
+      let payload: any = null;
+      if (jsonStr) {
+        payload = JSON.parse(jsonStr);
+      } else {
+        const plainStr = e.dataTransfer.getData('text/plain');
+        if (plainStr.startsWith('doc:')) {
+          payload = { itemType: 'document', id: plainStr.replace('doc:', '') };
+        } else if (plainStr.startsWith('folder:')) {
+          payload = { itemType: 'folder', id: plainStr.replace('folder:', '') };
+        }
+      }
+
+      if (payload && payload.id) {
+        onDropItem(targetFolderId, payload.itemType, payload.id);
+      }
+    } catch (err) {
+      console.warn('Failed to parse breadcrumb drag drop payload:', err);
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-2 transition-all">
+    <div ref={menuRef} className="flex flex-col gap-0 transition-all rounded-none bg-neutral-50 dark:bg-[#1f1f1f] border border-neutral-200/80 dark:border-[#2d2d2d]">
       {/* Bar 1: Top Address & Breadcrumb Navigation Bar */}
-      <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-neutral-50/90 dark:bg-neutral-900/90 border border-neutral-200/80 dark:border-neutral-800">
+      <div className="flex items-center justify-between gap-2 p-2 border-b border-neutral-200/80 dark:border-[#2d2d2d] rounded-none">
         {/* Left: Up, Refresh & Breadcrumbs Path */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           <button
@@ -180,9 +218,9 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               onNavigateToFolder(parentId);
             }}
             disabled={!currentFolderId}
-            className={`p-1.5 rounded-lg transition-colors ${
+            className={`p-1.5 rounded-none transition-colors ${
               currentFolderId
-                ? 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 cursor-pointer'
+                ? 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2d2d2d] cursor-pointer'
                 : 'text-neutral-300 dark:text-neutral-700 cursor-not-allowed opacity-40'
             }`}
             title="Up to parent folder"
@@ -192,14 +230,14 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
 
           <button
             onClick={() => onNavigateToFolder(currentFolderId)}
-            className="p-1.5 rounded-lg text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+            className="p-1.5 rounded-none text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2d2d2d] transition-colors cursor-pointer"
             title="Refresh folder content"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
 
           {/* Breadcrumbs Path Box */}
-          <div className="flex items-center gap-1 overflow-x-auto py-0.5 scrollbar-none text-xs sm:text-sm flex-1 min-w-0 bg-white dark:bg-neutral-950 px-2.5 py-1 rounded-lg border border-neutral-200/60 dark:border-neutral-800">
+          <div className="flex items-center gap-1 overflow-x-auto py-0.5 scrollbar-none text-xs sm:text-sm flex-1 min-w-0 bg-white dark:bg-[#2d2d2d] px-2.5 py-1 rounded-none border border-neutral-200/60 dark:border-[#383838]">
             <Laptop className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
             {breadcrumbs.map((crumb, idx) => {
               const isLast = idx === breadcrumbs.length - 1;
@@ -208,10 +246,15 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                   <ChevronRight className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
                   <button
                     onClick={() => onNavigateToFolder(crumb.id)}
-                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors whitespace-nowrap ${
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => handleBreadcrumbDrop(crumb.id, e)}
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded-none transition-colors whitespace-nowrap ${
                       isLast
-                        ? 'font-bold text-neutral-900 dark:text-white bg-neutral-100 dark:bg-neutral-800'
-                        : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                        ? 'font-bold text-neutral-900 dark:text-white bg-neutral-100 dark:bg-[#383838]'
+                        : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-[#383838]/60'
                     }`}
                   >
                     <span>{crumb.name}</span>
@@ -231,15 +274,15 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search files..."
-              className="w-full pl-8 pr-3 py-1 h-[30px] text-xs rounded-lg bg-white dark:bg-neutral-950 border border-neutral-200/60 dark:border-neutral-800 focus:outline-none focus:ring-1 focus:ring-blue-500 text-neutral-800 dark:text-neutral-200"
+              className="w-full pl-8 pr-3 py-1 h-[30px] text-xs rounded-none bg-white dark:bg-[#2d2d2d] border border-neutral-200/60 dark:border-[#383838] focus:outline-none focus:ring-1 focus:ring-blue-500 text-neutral-800 dark:text-neutral-200"
             />
           </div>
         )}
       </div>
 
       {/* Bar 2: Windows Explorer Command Toolbar Bar */}
-      <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl bg-neutral-50/90 dark:bg-neutral-900/90 border border-neutral-200/80 dark:border-neutral-800 text-xs select-none">
-        {/* Left Action Buttons (Faded opacity-40 when inactive, Highlighted active when valid) */}
+      <div className="flex items-center justify-between gap-2 p-1.5 rounded-none text-xs select-none">
+        {/* Left Action Buttons */}
         <div className="flex items-center gap-1 flex-wrap">
           {/* + New Dropdown */}
           {canModify && (
@@ -250,7 +293,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                   setIsSortMenuOpen(false);
                   setIsViewMenuOpen(false);
                 }}
-                className="flex items-center gap-1.5 px-3 h-[32px] rounded-lg border border-transparent text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 font-medium transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 h-[32px] rounded-none border border-transparent text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 font-medium transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4 text-blue-500 shrink-0" />
                 <span className="font-semibold">New</span>
@@ -258,13 +301,13 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               </button>
 
               {isNewMenuOpen && (
-                <div className="absolute left-0 top-full mt-1 z-30 w-40 p-1 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl animate-in fade-in duration-100">
+                <div className="absolute left-0 top-full mt-1 z-30 w-40 p-1 rounded-none bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl animate-in fade-in duration-100">
                   <button
                     onClick={() => {
-                      setIsNewFolderModalOpen(true);
+                      onCreateFolder('New folder', currentFolderId);
                       setIsNewMenuOpen(false);
                     }}
-                    className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
                     <FolderPlus className="w-4 h-4 text-blue-500 shrink-0" />
                     <span>Folder</span>
@@ -274,7 +317,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                       onOpenNewFileModal();
                       setIsNewMenuOpen(false);
                     }}
-                    className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
                     <FilePlus className="w-4 h-4 text-emerald-500 shrink-0" />
                     <span>File Upload</span>
@@ -291,7 +334,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             <button
               onClick={() => selectedDocIds.length > 0 && setIsMoveModalOpen(true)}
               disabled={selectedDocIds.length === 0}
-              className={`flex items-center justify-center gap-1.5 w-[88px] h-[32px] shrink-0 rounded-lg border transition-all ${
+              className={`flex items-center justify-center gap-1.5 w-[88px] h-[32px] shrink-0 rounded-none border transition-all ${
                 selectedDocIds.length > 0
                   ? 'bg-purple-600 hover:bg-purple-700 border-purple-600 text-white font-medium shadow-2xs cursor-pointer'
                   : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
@@ -304,7 +347,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             </button>
           )}
 
-          {/* Download Button - Fixed 120px Container (Zero Shift) */}
+          {/* Download Button */}
           <button
             onClick={() => {
               if (selectedFolderIds.length > 0) {
@@ -314,7 +357,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               }
             }}
             disabled={selectedFolderIds.length === 0 && selectedDocIds.length === 0}
-            className={`flex items-center justify-center gap-1.5 w-[120px] h-[32px] shrink-0 rounded-lg border transition-all ${
+            className={`flex items-center justify-center gap-1.5 w-[120px] h-[32px] shrink-0 rounded-none border transition-all ${
               selectedFolderIds.length > 0 || selectedDocIds.length > 0
                 ? 'bg-emerald-600 hover:bg-emerald-700 border-emerald-600 text-white font-medium shadow-2xs cursor-pointer'
                 : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
@@ -334,11 +377,11 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             )}
           </button>
 
-          {/* Pin / Quick Access Button - Fixed 92px Container (Zero Shift) */}
+          {/* Pin / Quick Access Button */}
           <button
             onClick={() => targetPinFolderId && onTogglePinFolder && onTogglePinFolder(targetPinFolderId)}
             disabled={!isPinActive}
-            className={`flex items-center justify-center gap-1.5 w-[92px] h-[32px] shrink-0 rounded-lg border transition-all ${
+            className={`flex items-center justify-center gap-1.5 w-[92px] h-[32px] shrink-0 rounded-none border transition-all ${
               isPinActive
                 ? isTargetPinned
                   ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-semibold cursor-pointer border-amber-300 dark:border-amber-700'
@@ -362,7 +405,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             <button
               onClick={() => isRenameActive && handleOpenRenameCurrent()}
               disabled={!isRenameActive}
-              className={`flex items-center justify-center gap-1.5 w-[90px] h-[32px] shrink-0 rounded-lg border transition-all ${
+              className={`flex items-center justify-center gap-1.5 w-[90px] h-[32px] shrink-0 rounded-none border transition-all ${
                 isRenameActive
                   ? 'border-transparent text-neutral-800 dark:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 font-medium cursor-pointer'
                   : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
@@ -379,7 +422,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             <button
               onClick={() => isDeleteActive && handleDeleteCurrent()}
               disabled={!isDeleteActive}
-              className={`flex items-center justify-center gap-1.5 w-[86px] h-[32px] shrink-0 rounded-lg border transition-all ${
+              className={`flex items-center justify-center gap-1.5 w-[86px] h-[32px] shrink-0 rounded-none border transition-all ${
                 isDeleteActive
                   ? 'border-transparent text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-medium cursor-pointer'
                   : 'border-transparent text-neutral-400 dark:text-neutral-600 opacity-40 cursor-not-allowed'
@@ -402,7 +445,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                 setIsViewMenuOpen(false);
                 setIsNewMenuOpen(false);
               }}
-              className="flex items-center gap-1.5 px-3 h-[32px] rounded-lg border border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 h-[32px] rounded-none border border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
             >
               <ArrowUpDown className="w-3.5 h-3.5 shrink-0" />
               <span className="font-medium">Sort</span>
@@ -410,13 +453,13 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             </button>
 
             {isSortMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-30 w-44 p-1 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl animate-in fade-in duration-100 space-y-0.5">
+              <div className="absolute right-0 top-full mt-1 z-30 w-44 p-1 rounded-none bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl animate-in fade-in duration-100 space-y-0.5">
                 <button
                   onClick={() => {
                     onSortFieldChange('name');
                     setIsSortMenuOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <span>Name</span>
                   {sortField === 'name' && <span className="text-blue-500 font-bold">•</span>}
@@ -426,7 +469,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                     onSortFieldChange('dateAdded');
                     setIsSortMenuOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <span>Date Modified</span>
                   {sortField === 'dateAdded' && <span className="text-blue-500 font-bold">•</span>}
@@ -436,7 +479,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                     onSortFieldChange('author');
                     setIsSortMenuOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <span>Type / Author</span>
                   {sortField === 'author' && <span className="text-blue-500 font-bold">•</span>}
@@ -447,7 +490,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                     onSortOrderChange('asc');
                     setIsSortMenuOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <span>Ascending</span>
                   {sortOrder === 'asc' && <span className="text-blue-500 font-bold">•</span>}
@@ -457,7 +500,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                     onSortOrderChange('desc');
                     setIsSortMenuOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <span>Descending</span>
                   {sortOrder === 'desc' && <span className="text-blue-500 font-bold">•</span>}
@@ -474,7 +517,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                 setIsSortMenuOpen(false);
                 setIsNewMenuOpen(false);
               }}
-              className="flex items-center gap-1.5 px-3 h-[32px] rounded-lg border border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 h-[32px] rounded-none border border-transparent text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/80 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
             >
               <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
               <span className="font-medium">View</span>
@@ -482,13 +525,13 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
             </button>
 
             {isViewMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-30 w-48 p-1 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl animate-in fade-in duration-100 space-y-0.5">
+              <div className="absolute right-0 top-full mt-1 z-30 w-48 p-1 rounded-none bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl animate-in fade-in duration-100 space-y-0.5">
                 <button
                   onClick={() => {
                     onViewModeChange('grid');
                     setIsViewMenuOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <div className="flex items-center gap-2">
                     <LayoutGrid className="w-4 h-4 text-neutral-500" />
@@ -501,7 +544,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                     onViewModeChange('list');
                     setIsViewMenuOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded-none text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <div className="flex items-center gap-2">
                     <ListIcon className="w-4 h-4 text-neutral-500" />
@@ -520,7 +563,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
           <form
             onSubmit={handleCreateSubmit}
-            className="w-full max-w-sm p-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4"
+            className="w-full max-w-sm p-6 rounded-none bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4"
           >
             <h3 className="text-base font-bold text-neutral-900 dark:text-white">Create New Folder</h3>
             <div>
@@ -533,21 +576,21 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
                 placeholder="e.g. Assignments 2026"
-                className="w-full px-3 py-2 text-sm rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-neutral-900 dark:text-white"
+                className="w-full px-3 py-2 text-sm rounded-none border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-neutral-900 dark:text-white"
               />
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setIsNewFolderModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                className="px-4 py-2 rounded-none text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!newFolderName.trim()}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white shadow-xs transition-colors"
+                className="px-4 py-2 rounded-none text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white shadow-xs transition-colors"
               >
                 Create Folder
               </button>
@@ -561,7 +604,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
           <form
             onSubmit={handleRenameSubmit}
-            className="w-full max-w-sm p-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4"
+            className="w-full max-w-sm p-6 rounded-none bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4"
           >
             <h3 className="text-base font-bold text-neutral-900 dark:text-white">Rename Folder</h3>
             <div>
@@ -573,21 +616,21 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                 autoFocus
                 value={renameFolderName}
                 onChange={(e) => setRenameFolderName(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-neutral-900 dark:text-white"
+                className="w-full px-3 py-2 text-sm rounded-none border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-neutral-900 dark:text-white"
               />
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setIsRenameModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                className="px-4 py-2 rounded-none text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!renameFolderName.trim()}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white shadow-xs transition-colors"
+                className="px-4 py-2 rounded-none text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white shadow-xs transition-colors"
               >
                 Rename
               </button>
@@ -601,7 +644,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
           <form
             onSubmit={handleMoveSubmit}
-            className="w-full max-w-md p-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4"
+            className="w-full max-w-md p-6 rounded-none bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4"
           >
             <h3 className="text-base font-bold text-neutral-900 dark:text-white">
               Move {selectedDocIds.length} File(s)
@@ -610,11 +653,11 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               Select target destination folder:
             </p>
 
-            <div className="max-h-60 overflow-y-auto space-y-1 py-1 pr-1 border rounded-xl border-neutral-200 dark:border-neutral-800 p-2">
+            <div className="max-h-60 overflow-y-auto space-y-1 py-1 pr-1 border rounded-none border-neutral-200 dark:border-neutral-800 p-2">
               <button
                 type="button"
                 onClick={() => setTargetMoveFolderId(null)}
-                className={`w-full flex items-center gap-2 p-2 rounded-lg text-xs font-medium text-left transition-colors ${
+                className={`w-full flex items-center gap-2 p-2 rounded-none text-xs font-medium text-left transition-colors ${
                   targetMoveFolderId === null
                     ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-bold'
                     : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
@@ -629,7 +672,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
                   key={f.id}
                   type="button"
                   onClick={() => setTargetMoveFolderId(f.id)}
-                  className={`w-full flex items-center gap-2 p-2 rounded-lg text-xs font-medium text-left transition-colors ${
+                  className={`w-full flex items-center gap-2 p-2 rounded-none text-xs font-medium text-left transition-colors ${
                     targetMoveFolderId === f.id
                       ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-bold'
                       : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
@@ -645,13 +688,13 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               <button
                 type="button"
                 onClick={() => setIsMoveModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                className="px-4 py-2 rounded-none text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors"
+                className="px-4 py-2 rounded-none text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors"
               >
                 Move Files
               </button>
