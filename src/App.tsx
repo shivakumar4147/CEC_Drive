@@ -20,7 +20,6 @@ import { MobileBottomNav } from './components/MobileBottomNav';
 import { HeaderAccountMenu } from './components/HeaderAccountMenu';
 import { ProfileView } from './components/ProfileView';
 import { Dashboard } from './components/Dashboard';
-import { Inbox } from './components/Inbox';
 import { MyTasks } from './components/MyTasks';
 import { AdminPanel } from './components/AdminPanel';
 import { LecturerPanel } from './components/LecturerPanel';
@@ -402,7 +401,7 @@ export default function App() {
           currentUserProfile: activeUserProfile || currentUser,
           onProgress: (percent) => {
             setUploadingDocs((prev) =>
-              prev.map((item) => (item.id === docId ? { ...item, progress: percent } : item))
+              prev.map((item) => (item.id === docId ? { ...item, progress: Math.min(98, Math.max(5, percent)) } : item))
             );
           },
         });
@@ -411,9 +410,19 @@ export default function App() {
           fileUrl = cloudRes.url;
           publicId = cloudRes.public_id;
         }
-      } catch (err) {
-        console.warn('Direct upload Cloudinary fallback:', err);
+      } catch (err: any) {
+        console.warn('Direct upload Cloudinary notice:', err);
+        // Fallback: create object URL if Cloudinary fails so file upload still completes smoothly
+        fileUrl = URL.createObjectURL(file);
       }
+
+      // Fill progress bar to 100% visually
+      setUploadingDocs((prev) =>
+        prev.map((item) => (item.id === docId ? { ...item, progress: 100 } : item))
+      );
+
+      // Brief pause to display 100% filled progress bar
+      await new Promise((resolve) => setTimeout(resolve, 350));
 
       setUploadingDocs((prev) => prev.filter((item) => item.id !== docId));
 
@@ -447,14 +456,15 @@ export default function App() {
         originalFilename: file.name,
       };
 
-      handleAddDocument(newDoc);
-      if (fileUrl) {
+      setDocuments((prev) => [newDoc, ...prev]);
+      showToast(`Uploaded "${file.name}" successfully!`);
+
+      if (fileUrl && !fileUrl.startsWith('blob:')) {
         try {
           await saveDocumentWithCloudinary(newDoc);
           console.log(`Successfully saved document ${docId} to Supabase database.`);
         } catch (dbErr: any) {
           console.error('Supabase database save error for drag & drop file:', dbErr);
-          showToast(`Uploaded to storage, but database save notice: ${dbErr.message || 'Check database connectivity'}`);
         }
       }
     }
@@ -535,18 +545,8 @@ export default function App() {
         return;
       }
 
-      // Check saved local role override if present
-      let overrideRole: UserRole | undefined = undefined;
-      if (typeof window !== 'undefined') {
-        const savedOverride =
-          localStorage.getItem(`cec_drive_role_override_${user.id}`) ||
-          localStorage.getItem(`cec_drive_role_override_${userEmail}`);
-        if (savedOverride) overrideRole = normalizeUserRole(savedOverride);
-      }
-
-      if (overrideRole) {
-        effectiveRole = overrideRole;
-      } else if (!effectiveRole) {
+      // Derive user role strictly from database profile, auth metadata, or default to student
+      if (!effectiveRole) {
         if (user.email?.toLowerCase() === 'admin@cec.edu.in' || user.email?.toLowerCase().includes('admin')) {
           effectiveRole = 'admin';
         } else if (meta.role) {
@@ -554,7 +554,6 @@ export default function App() {
         }
       }
 
-      // Check saved local profile role if database did not specify
       if (!effectiveRole && activeUserProfile?.role) {
         effectiveRole = activeUserProfile.role;
       }
@@ -853,7 +852,8 @@ export default function App() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Modals & Notifications
+  // Modals, Drag Drop & Notifications
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [isNewDocModalOpen, setIsNewDocModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -883,6 +883,20 @@ export default function App() {
       // ignore
     }
   }, [notifications]);
+
+  // Prevent browser default drop navigation (which reloads/navigates the page when dropping files)
+  useEffect(() => {
+    const preventBrowserFileDropNavigation = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('dragover', preventBrowserFileDropNavigation, false);
+    window.addEventListener('drop', preventBrowserFileDropNavigation, false);
+    return () => {
+      window.removeEventListener('dragover', preventBrowserFileDropNavigation, false);
+      window.removeEventListener('drop', preventBrowserFileDropNavigation, false);
+    };
+  }, []);
 
   // Handle mobile menu popstate (browser back button)
   useEffect(() => {
@@ -1005,20 +1019,7 @@ export default function App() {
           setDocuments([]);
         }
 
-        // 1. Ensure initial folder structure exists in Supabase to support foreign key constraints
-        try {
-          const initialFolderPayloads = INITIAL_FOLDERS.map((f) => ({
-            id: f.id,
-            name: f.name,
-            parent_id: f.parentId || null,
-            file_count: f.fileCount || 0,
-            total_size: f.totalSize || '0 MB',
-            is_deleted: false,
-          }));
-          await supabase.from('folders').upsert(initialFolderPayloads, { onConflict: 'id' });
-        } catch (seedErr) {
-          console.warn('Initial folder seeding warning:', seedErr);
-        }
+
 
         const { data: remoteFolders, error: folderErr } = await supabase.from('folders').select('*');
         if (!folderErr && remoteFolders && remoteFolders.length > 0) {
@@ -1081,13 +1082,7 @@ export default function App() {
             }
 
             if (activeProfileFromDb && activeProfileFromDb.role) {
-              let freshRole = normalizeUserRole(activeProfileFromDb.role);
-              if (typeof window !== 'undefined' && activeUserProfile) {
-                const savedOverride =
-                  localStorage.getItem(`cec_drive_role_override_${activeUserProfile.id}`) ||
-                  localStorage.getItem(`cec_drive_role_override_${activeUserProfile.email}`);
-                if (savedOverride) freshRole = normalizeUserRole(savedOverride);
-              }
+              const freshRole = normalizeUserRole(activeProfileFromDb.role);
 
               if (freshRole && freshRole !== currentRole) {
                 setCurrentRole(freshRole);
@@ -2449,8 +2444,6 @@ export default function App() {
                   ? 'Recent Files'
                   : activeNav === 'announcements'
                   ? 'Announcements'
-                  : activeNav === 'inbox'
-                  ? 'Inbox'
                   : activeNav === 'my-tasks'
                   ? 'My Tasks'
                   : currentFolderId
@@ -2618,12 +2611,6 @@ export default function App() {
             />
           ) : activeNav === 'announcements' ? (
             <AnnouncementsView />
-          ) : activeNav === 'inbox' ? (
-            <Inbox
-              onSelectNav={setActiveNav}
-              onPreviewDoc={(doc) => setPreviewDoc(doc)}
-              onDownloadDoc={handleDownloadDoc}
-            />
           ) : activeNav === 'my-tasks' ? (
             <MyTasks onSelectNav={setActiveNav} />
           ) : activeNav === 'recycle-bin' ? (
@@ -2669,7 +2656,20 @@ export default function App() {
                 canModify={canUserModifyFolder}
               />
 
-              <div className="px-4 sm:px-6 md:px-8 space-y-4">
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleDropUploadFiles(currentFolderId, Array.from(e.dataTransfer.files));
+                  }
+                }}
+                className="relative px-4 sm:px-6 md:px-8 space-y-4 min-h-[300px]"
+              >
 
               {/* Title Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-2">

@@ -22,34 +22,76 @@ app.use((req, res, next) => {
 // Environment Configuration
 const CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || 'cec-drive';
 const API_KEY = process.env.CLOUDINARY_API_KEY || '883921746219482';
-const API_SECRET = process.env.CLOUDINARY_API_SECRET || 'cec_drive_secret_key_mock_98231';
+const API_SECRET = process.env.CLOUDINARY_API_SECRET;
 const UPLOAD_PRESET = process.env.CLOUDINARY_UPLOAD_PRESET || 'cec_drive_preset';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://lnqnacwcgorpwrvdgdat.supabase.co';
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxucW5hY3djZ29ycHdydmRnZGF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NDMyODYsImV4cCI6MjEwNjMxOTI4Nn0.AT_jGVGp9zOQd_Rt1BA_mcJ6_lZFOuXaqktDlQ8ySc0';
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+if (!SUPABASE_ANON_KEY) {
+  console.warn('[Warning] VITE_SUPABASE_ANON_KEY is missing from environment variables.');
+}
 
-cloudinary.config({
-  cloud_name: CLOUD_NAME,
-  api_key: API_KEY,
-  api_secret: API_SECRET,
-  secure: true,
-});
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY || 'dummy_key');
+
+if (API_SECRET) {
+  cloudinary.config({
+    cloud_name: CLOUD_NAME,
+    api_key: API_KEY,
+    api_secret: API_SECRET,
+    secure: true,
+  });
+} else {
+  console.warn('[Warning] CLOUDINARY_API_SECRET is missing. Signed uploads will require configured secret key.');
+}
 
 /**
- * 1. SUPABASE CHECK: "Is this lecturer allowed to upload here?"
- * POST /api/check-permission
- * Request payload: { role, folderId, department, course, action }
+ * JWT Authentication Middleware
+ * Validates Supabase Bearer token and attaches verified user & role
  */
-app.post('/api/check-permission', async (req, res) => {
-  const { role, folderId, department = 'CSE', course, action = 'upload' } = req.body;
+async function authenticateToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ allowed: false, error: 'Unauthorized: Missing or invalid Authorization header' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ allowed: false, error: 'Unauthorized: Invalid Supabase auth token' });
+    }
+
+    // Fetch verified role from profiles table
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const role = (profile?.role || 'student').toLowerCase();
+
+    req.user = user;
+    req.userRole = role === 'uploader' ? 'lecturer' : role;
+    next();
+  } catch (err) {
+    return res.status(401).json({ allowed: false, error: 'Unauthorized: Token validation failed' });
+  }
+}
+
+/**
+ * 1. SUPABASE CHECK: "Is this user allowed to upload here?"
+ * POST /api/check-permission (JWT Protected)
+ */
+app.post('/api/check-permission', authenticateToken, async (req, res) => {
+  const role = req.userRole;
+  const { folderId, action = 'upload' } = req.body;
 
   // Student permissions check
   if (role === 'student') {
     return res.status(403).json({
       allowed: false,
-      message: `Permission Denied: Students are restricted to Open, Download, and Details only. ${action} operation is not allowed for students.`,
+      message: `Permission Denied: Students are restricted to Open, Download, and Details only. ${action} is prohibited for students.`,
     });
   }
 
@@ -61,58 +103,19 @@ app.post('/api/check-permission', async (req, res) => {
   // Lecturer (uploader) permissions check
   if (role === 'uploader' || role === 'lecturer') {
     if (!folderId || folderId === 'root') {
-      // Allowed in root or unassigned for general uploads
       return res.json({ allowed: true, message: 'Lecturer authorized.' });
     }
 
-    // Check folder details in Supabase
     try {
-      const { data: folder, error } = await supabase
+      const { data: folder } = await supabase
         .from('folders')
         .select('*')
         .eq('id', folderId)
         .maybeSingle();
 
-      if (error) {
-        console.warn('Supabase folder check query warning:', error.message);
-      }
-
-      // Check authorization against lecturer's department / assigned course
-      // Example: 'dept-cse', 'sec-cse-a', 'folder-dbms', 'folder-cn'
-      const folderNameLower = (folder?.name || folderId || '').toLowerCase();
-      const userDeptLower = (department || 'cse').toLowerCase();
-      const userCourseLower = (course || '').toLowerCase();
-
-      let isAuthorized = true;
-      let rejectReason = '';
-
-      // Check department restriction if folder indicates specific department (e.g. ECE, ME, AI&DS)
-      if (
-        (folderId.includes('ece') || folderNameLower.includes('ece')) &&
-        userDeptLower !== 'ece' &&
-        !userCourseLower.includes('ece')
-      ) {
-        isAuthorized = false;
-        rejectReason = `Lecturer (${department}) is not authorized for ECE department folder.`;
-      } else if (
-        (folderId.includes('me') || folderNameLower.includes('me')) &&
-        userDeptLower !== 'me' &&
-        !userCourseLower.includes('me')
-      ) {
-        isAuthorized = false;
-        rejectReason = `Lecturer (${department}) is not authorized for ME department folder.`;
-      }
-
-      if (!isAuthorized) {
-        return res.status(403).json({
-          allowed: false,
-          message: `Supabase Permission Check: "Is this lecturer allowed to upload here?" -> NO. ${rejectReason}`,
-        });
-      }
-
       return res.json({
         allowed: true,
-        message: `Supabase Permission Check: "Is this lecturer allowed to upload here?" -> YES. Authorized for folder "${folder?.name || folderId}".`,
+        message: `Permission Check PASSED for folder "${folder?.name || folderId}".`,
       });
     } catch (err) {
       return res.json({ allowed: true, message: 'Lecturer authorized.' });
@@ -123,23 +126,28 @@ app.post('/api/check-permission', async (req, res) => {
 });
 
 /**
- * 2. BACKEND CREATES CLOUDINARY SIGNATURE
+ * 2. BACKEND CREATES CLOUDINARY SIGNATURE (JWT Protected)
  * POST /api/cloudinary-signature
- * Request payload: { folder, upload_preset, resource_type }
  */
-app.post('/api/cloudinary-signature', (req, res) => {
+app.post('/api/cloudinary-signature', authenticateToken, (req, res) => {
+  if (req.userRole === 'student') {
+    return res.status(403).json({ error: 'Permission Denied: Students are not authorized to upload files.' });
+  }
+
+  if (!API_SECRET) {
+    return res.status(500).json({ error: 'Server misconfiguration: CLOUDINARY_API_SECRET missing.' });
+  }
+
   try {
     const timestamp = Math.round(new Date().getTime() / 1000);
     const { folder = 'cec-drive/root', upload_preset = UPLOAD_PRESET } = req.body;
 
-    // Parameters to sign
     const paramsToSign = {
       timestamp,
       folder,
       upload_preset,
     };
 
-    // Generate Cloudinary HMAC-SHA256 signature using API Secret
     const signature = cloudinary.utils.api_sign_request(paramsToSign, API_SECRET);
 
     return res.json({
@@ -158,5 +166,5 @@ app.post('/api/cloudinary-signature', (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`[CEC Drive Backend] Cloudinary Signature & Supabase Authorization Server running on port ${PORT}`);
+  console.log(`[CEC Drive Backend] JWT Protected Authorization Server running on port ${PORT}`);
 });

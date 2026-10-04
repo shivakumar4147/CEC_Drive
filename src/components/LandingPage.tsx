@@ -201,26 +201,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         }
       } else {
         // ==========================================
-        // CREATE ACCOUNT MODE: Dedicated Registration
+        // CREATE ACCOUNT MODE: Dedicated Registration (Student Only)
+        // Public registration strictly defaults to student role.
+        // Lecturer & Admin roles must be granted by Administrator.
         // ==========================================
-        const role = selectedRole === 'student' ? 'student' : 'uploader';
-        const metadata =
-          role === 'student'
-            ? {
-                name: studentName,
-                usn: studentUSN,
-                role: 'student',
-                academic_year: studentAcademicYear,
-                department: studentDept,
-                semester: studentSem,
-                section: studentSec,
-              }
-            : {
-                name: lecturerName,
-                role: 'uploader',
-                department: lecturerDept,
-                course: lecturerCourse,
-              };
+        const role = 'student';
+        const metadata = {
+          name: studentName,
+          usn: studentUSN,
+          role: 'student',
+          academic_year: studentAcademicYear,
+          department: studentDept,
+          semester: studentSem,
+          section: studentSec,
+        };
 
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: activeEmail,

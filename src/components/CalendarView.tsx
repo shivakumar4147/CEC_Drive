@@ -1,57 +1,97 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, MapPin, AlertCircle, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+
+export interface CalendarEventItem {
+  id: string | number;
+  title: string;
+  subject: string;
+  code: string;
+  date: string;
+  time: string;
+  location: string;
+  type: string;
+  badgeBg: string;
+}
+
+const INITIAL_EVENTS: CalendarEventItem[] = [
+  {
+    id: 1,
+    title: 'DAA Internal Assessment Test 2',
+    subject: 'Design & Analysis of Algorithms',
+    code: 'CS503',
+    date: 'Oct 05, 2026',
+    time: '10:00 AM - 11:30 AM',
+    location: 'LH-302, Academic Block A',
+    type: 'Exam',
+    badgeBg: 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900',
+  },
+  {
+    id: 2,
+    title: 'CN Packet Tracer Assignment Submission Deadline',
+    subject: 'Computer Networks',
+    code: 'CS502',
+    date: 'Oct 08, 2026',
+    time: '11:59 PM Deadline',
+    location: 'CEC Drive Portal Upload',
+    type: 'Assignment',
+    badgeBg: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900',
+  },
+  {
+    id: 3,
+    title: 'DBMS SQL Viva & Practical Examination',
+    subject: 'Database Management Systems',
+    code: 'CS501',
+    date: 'Oct 12, 2026',
+    time: '02:00 PM - 05:00 PM',
+    location: 'Advanced Computing Lab 2',
+    type: 'Lab Viva',
+    badgeBg: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900',
+  },
+  {
+    id: 4,
+    title: 'Web Tech React Hooks Live Workshop',
+    subject: 'Web Technology & Frameworks',
+    code: 'CS505',
+    date: 'Oct 15, 2026',
+    time: '11:00 AM - 01:00 PM',
+    location: 'Seminar Hall B',
+    type: 'Workshop',
+    badgeBg: 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-900',
+  },
+];
 
 export const CalendarView: React.FC = () => {
-  const events = [
-    {
-      id: 1,
-      title: 'DAA Internal Assessment Test 2',
-      subject: 'Design & Analysis of Algorithms',
-      code: 'CS503',
-      date: 'Oct 05, 2026',
-      time: '10:00 AM - 11:30 AM',
-      location: 'LH-302, Academic Block A',
-      type: 'Exam',
-      color: 'bg-rose-500',
-      badgeBg: 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900',
-    },
-    {
-      id: 2,
-      title: 'CN Packet Tracer Assignment Submission Deadline',
-      subject: 'Computer Networks',
-      code: 'CS502',
-      date: 'Oct 08, 2026',
-      time: '11:59 PM Deadline',
-      location: 'CEC Drive Portal Upload',
-      type: 'Assignment',
-      color: 'bg-blue-500',
-      badgeBg: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900',
-    },
-    {
-      id: 3,
-      title: 'DBMS SQL Viva & Practical Examination',
-      subject: 'Database Management Systems',
-      code: 'CS501',
-      date: 'Oct 12, 2026',
-      time: '02:00 PM - 05:00 PM',
-      location: 'Advanced Computing Lab 2',
-      type: 'Lab Viva',
-      color: 'bg-amber-500',
-      badgeBg: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900',
-    },
-    {
-      id: 4,
-      title: 'Web Tech React Hooks Live Workshop',
-      subject: 'Web Technology & Frameworks',
-      code: 'CS505',
-      date: 'Oct 15, 2026',
-      time: '11:00 AM - 01:00 PM',
-      location: 'Seminar Hall B',
-      type: 'Workshop',
-      color: 'bg-purple-500',
-      badgeBg: 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-900',
-    },
-  ];
+  const [events, setEvents] = useState<CalendarEventItem[]>(INITIAL_EVENTS);
+
+  useEffect(() => {
+    async function fetchEvents() {
+      try {
+        const { data, error } = await supabase
+          .from('calendar_events')
+          .select('*')
+          .order('event_date', { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          const fetchedEvents: CalendarEventItem[] = data.map((evt: any) => ({
+            id: evt.id,
+            title: evt.title,
+            subject: evt.subject || 'Academic Event',
+            code: evt.code || 'CS500',
+            date: evt.event_date ? new Date(evt.event_date).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Upcoming',
+            time: evt.event_time || 'Schedule TBA',
+            location: evt.location || 'CEC Campus',
+            type: evt.event_type || 'Exam',
+            badgeBg: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900',
+          }));
+          setEvents(fetchedEvents);
+        }
+      } catch (err) {
+        console.warn('Calendar events live fetch notice:', err);
+      }
+    }
+    fetchEvents();
+  }, []);
 
   return (
     <div className="space-y-6 pb-10">

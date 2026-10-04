@@ -147,18 +147,37 @@ export async function uploadFileToCloudinary(
     throw new Error(permCheck.message || 'Unauthorized upload attempt');
   }
 
+  // Step 1.5: Enforce strict file size limits
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  const fileSizeMB = file.size / (1024 * 1024);
+
+  if ((ext === 'pdf' || file.type === 'application/pdf') && fileSizeMB > 25) {
+    throw new Error('File limit exceeded: PDF documents must be under 25 MB.');
+  } else if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext) && fileSizeMB > 10) {
+    throw new Error('File limit exceeded: Image files must be under 10 MB.');
+  } else if (fileSizeMB > 100) {
+    throw new Error('File limit exceeded: Upload size cannot exceed 100 MB.');
+  }
+
   // Step 2: Build Cloudinary Storage Path
   const storageFolder = options?.customPath || buildCloudinaryStoragePath(options?.folderId, options?.docId);
 
   // Step 3: Detect Cloudinary Resource Type (raw, image, video, auto)
   const resourceType = detectCloudinaryResourceType(file.name, file.type);
 
-  // Step 4: Fetch Backend Cloudinary Signature
+  // Step 4: Fetch Backend Cloudinary Signature with Supabase JWT
+  const { data: { session } } = await supabase.auth.getSession();
   let signatureData: { signature: string; timestamp: number; api_key: string; upload_preset: string } | null = null;
+
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+
     const sigRes = await fetch('http://localhost:3001/api/cloudinary-signature', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         folder: storageFolder,
         upload_preset: UPLOAD_PRESET,
@@ -173,13 +192,13 @@ export async function uploadFileToCloudinary(
   }
 
   // Helper function to execute Cloudinary POST upload request with XMLHttpRequest for live progress
-  const doUpload = async (withSignature: boolean): Promise<any> => {
+  const doUpload = async (): Promise<any> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', signatureData?.upload_preset || UPLOAD_PRESET);
     formData.append('folder', storageFolder);
 
-    if (withSignature && signatureData?.signature) {
+    if (signatureData?.signature) {
       formData.append('signature', signatureData.signature);
       formData.append('timestamp', signatureData.timestamp.toString());
       formData.append('api_key', signatureData.api_key);
@@ -231,23 +250,11 @@ export async function uploadFileToCloudinary(
   };
 
   try {
-    // Attempt 1: Try with signature if signature data was returned from backend
-    const firstResult = await doUpload(!!signatureData?.signature);
-    if ('url' in firstResult) {
-      return firstResult as CloudinaryUploadResult;
+    const uploadResult = await doUpload();
+    if ('url' in uploadResult) {
+      return uploadResult as CloudinaryUploadResult;
     }
-
-    // Attempt 2: If signature failed due to "Invalid Signature", retry as Unsigned upload preset
-    if (signatureData?.signature && firstResult.error?.includes('Invalid Signature')) {
-      console.warn('Cloudinary signed upload returned Invalid Signature. Retrying with Unsigned upload preset...');
-      const fallbackResult = await doUpload(false);
-      if ('url' in fallbackResult) {
-        return fallbackResult as CloudinaryUploadResult;
-      }
-      throw new Error(`Cloudinary upload failed: ${fallbackResult.error}`);
-    }
-
-    throw new Error(`Cloudinary upload failed: ${firstResult.error}`);
+    throw new Error(`Cloudinary upload failed: ${uploadResult.error}`);
   } catch (err: any) {
     console.error('Cloudinary upload failure:', err);
     throw new Error(err.message || 'Failed to upload file to Cloudinary.');

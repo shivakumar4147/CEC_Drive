@@ -94,7 +94,6 @@ export type ActiveNavKey =
   | 'pinned-folders'
   | 'recent-files'
   | 'announcements'
-  | 'inbox'
   | 'my-tasks'
   | 'folders'
   | 'documents'
