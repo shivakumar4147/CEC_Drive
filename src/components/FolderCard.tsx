@@ -187,6 +187,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
 
   return (
     <div
+      data-folder-id={folder.id}
       draggable={canModify}
       onDragStart={handleDragStart}
       onClick={handleClick}

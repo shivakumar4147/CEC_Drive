@@ -20,7 +20,6 @@ import { fetchRecentActivities, ActivityLogEntry } from '../lib/activity';
 
 interface DashboardProps {
   onSelectNav: (key: any) => void;
-  onPreviewDoc?: (doc: DocumentItem) => void;
   onDownloadDoc?: (doc: DocumentItem) => void;
   documents?: DocumentItem[];
 }

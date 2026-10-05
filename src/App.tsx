@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import JSZip from 'jszip';
 import {
   Folder as FolderIcon,
@@ -35,8 +35,16 @@ import { DocumentGrid } from './components/DocumentGrid';
 import { supabase } from './lib/supabase';
 import { handleSecureFileDownload, uploadFileToCloudinary, saveDocumentWithCloudinary } from './lib/cloudinary';
 import { logActivity } from './lib/activity';
+import {
+  fetchLecturerAssignments,
+  createLecturerAssignment,
+  deleteLecturerAssignment,
+  resolveFolderAcademicContext,
+  checkLecturerScopeAuthorization,
+  fetchStudentsByScope,
+  exportFolderStudentDetailsToExcel,
+} from './lib/academicDb';
 import { BatchActionBar } from './components/BatchActionBar';
-import { DocumentPreviewModal } from './components/DocumentPreviewModal';
 import { NewDocumentModal } from './components/NewDocumentModal';
 import { RecycleBinView } from './components/RecycleBinView';
 import { ResetPasswordModal } from './components/ResetPasswordModal';
@@ -52,6 +60,7 @@ import {
   UserRole,
   UserProfile,
   UploadingDocItem,
+  LecturerAssignment,
   normalizeUserRole,
 } from './types';
 
@@ -365,6 +374,137 @@ export default function App() {
 
   // Active File Upload Progress State
   const [uploadingDocs, setUploadingDocs] = useState<UploadingDocItem[]>([]);
+
+  // Marquee Rubberband Selection State
+  const [marqueeBox, setMarqueeBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeInitialFoldersRef = useRef<string[]>([]);
+  const marqueeInitialDocsRef = useRef<string[]>([]);
+  const justMarqueeDraggedRef = useRef<boolean>(false);
+  const fileDirectoryContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleContainerClickCapture = (e: React.MouseEvent) => {
+    if (justMarqueeDraggedRef.current) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
+
+  const handleMarqueeMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+
+    const target = e.target as HTMLElement;
+    if (target.closest('input, textarea, select, button, [role="checkbox"], a, [data-folder-id], [data-doc-id]')) {
+      return;
+    }
+
+    if (!fileDirectoryContainerRef.current) return;
+
+    const isCtrl = e.ctrlKey || e.metaKey;
+
+    marqueeStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+    };
+
+    if (isCtrl) {
+      marqueeInitialFoldersRef.current = [...selectedFolderIds];
+      marqueeInitialDocsRef.current = [...selectedDocIds];
+    } else {
+      marqueeInitialFoldersRef.current = [];
+      marqueeInitialDocsRef.current = [];
+    }
+
+    let isDragStarted = false;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!marqueeStartRef.current || !fileDirectoryContainerRef.current) return;
+
+      const startX = marqueeStartRef.current.x;
+      const startY = marqueeStartRef.current.y;
+      const dx = Math.abs(moveEvent.clientX - startX);
+      const dy = Math.abs(moveEvent.clientY - startY);
+
+      if (!isDragStarted && (dx > 3 || dy > 3)) {
+        isDragStarted = true;
+        justMarqueeDraggedRef.current = true;
+      }
+
+      if (!isDragStarted) return;
+
+      const containerRect = fileDirectoryContainerRef.current.getBoundingClientRect();
+
+      const screenLeft = Math.min(startX, moveEvent.clientX);
+      const screenTop = Math.min(startY, moveEvent.clientY);
+      const screenRight = Math.max(startX, moveEvent.clientX);
+      const screenBottom = Math.max(startY, moveEvent.clientY);
+
+      const boxLeft = Math.max(0, screenLeft - containerRect.left);
+      const boxTop = Math.max(0, screenTop - containerRect.top);
+      const boxWidth = Math.min(containerRect.width - boxLeft, screenRight - screenLeft);
+      const boxHeight = screenBottom - screenTop;
+
+      setMarqueeBox({ left: boxLeft, top: boxTop, width: boxWidth, height: boxHeight });
+
+      const folderElements = fileDirectoryContainerRef.current.querySelectorAll('[data-folder-id]');
+      const docElements = fileDirectoryContainerRef.current.querySelectorAll('[data-doc-id]');
+
+      const intersectedFolders = new Set<string>(marqueeInitialFoldersRef.current);
+      folderElements.forEach((el) => {
+        const id = el.getAttribute('data-folder-id');
+        if (!id) return;
+        const elRect = el.getBoundingClientRect();
+        const intersects = !(
+          elRect.right < screenLeft ||
+          elRect.left > screenRight ||
+          elRect.bottom < screenTop ||
+          elRect.top > screenBottom
+        );
+        if (intersects) intersectedFolders.add(id);
+      });
+
+      const intersectedDocs = new Set<string>(marqueeInitialDocsRef.current);
+      docElements.forEach((el) => {
+        const id = el.getAttribute('data-doc-id');
+        if (!id) return;
+        const elRect = el.getBoundingClientRect();
+        const intersects = !(
+          elRect.right < screenLeft ||
+          elRect.left > screenRight ||
+          elRect.bottom < screenTop ||
+          elRect.top > screenBottom
+        );
+        if (intersects) intersectedDocs.add(id);
+      });
+
+      setSelectedFolderIds(Array.from(intersectedFolders));
+      setSelectedDocIds(Array.from(intersectedDocs));
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+
+      setMarqueeBox(null);
+      marqueeStartRef.current = null;
+
+      if (isDragStarted) {
+        justMarqueeDraggedRef.current = true;
+        setTimeout(() => {
+          justMarqueeDraggedRef.current = false;
+        }, 150);
+      } else {
+        const targetEl = upEvent.target as HTMLElement;
+        if (!targetEl.closest('[data-folder-id], [data-doc-id], button, input, textarea, select, a')) {
+          setSelectedFolderIds([]);
+          setSelectedDocIds([]);
+        }
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   // Drag & Drop / Direct Upload Handler with Live Progress on File Cards
   const handleDropUploadFiles = async (targetFolderId: string | null | undefined, files: File[]) => {
@@ -852,9 +992,50 @@ export default function App() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Lecturer Assignments state
+  const [lecturerAssignments, setLecturerAssignments] = useState<LecturerAssignment[]>([
+    {
+      id: 'asgn-default-1',
+      lecturer_id: 'usr-2',
+      department: 'CSE',
+      section: 'Sec A',
+      course: 'DBMS',
+      academic_year: '2026-27',
+      semester: '5th Sem',
+    },
+  ]);
+
+  useEffect(() => {
+    const loadAssignments = async () => {
+      const dbAssignments = await fetchLecturerAssignments();
+      if (dbAssignments && dbAssignments.length > 0) {
+        setLecturerAssignments(dbAssignments);
+      }
+    };
+    loadAssignments();
+  }, []);
+
+  const handleAddAssignment = async (asgn: Omit<LecturerAssignment, 'id' | 'created_at'>) => {
+    const created = await createLecturerAssignment(asgn);
+    if (created) {
+      setLecturerAssignments((prev) => [created, ...prev]);
+    } else {
+      const fallbackItem: LecturerAssignment = {
+        id: `asgn-local-${Date.now()}`,
+        ...asgn,
+        created_at: new Date().toISOString(),
+      };
+      setLecturerAssignments((prev) => [fallbackItem, ...prev]);
+    }
+  };
+
+  const handleDeleteAssignment = async (asgnId: string) => {
+    await deleteLecturerAssignment(asgnId);
+    setLecturerAssignments((prev) => prev.filter((a) => a.id !== asgnId));
+  };
+
   // Modals, Drag Drop & Notifications
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
-  const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [isNewDocModalOpen, setIsNewDocModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -974,7 +1155,13 @@ export default function App() {
             const name = docRec.name || fileRec.name || fileRec.original_filename || 'Untitled Document';
             const isSoftDeleted =
               Boolean(docRec.is_deleted) ||
+              docRec.is_deleted === 'true' ||
+              docRec.status === 'moved to bin' ||
+              docRec.status === 'deleted' ||
               Boolean(fileRec.is_deleted) ||
+              fileRec.is_deleted === 'true' ||
+              fileRec.status === 'moved to bin' ||
+              fileRec.status === 'deleted' ||
               Boolean(docRec.isDeleted) ||
               localDeletedDocIds.has(id) ||
               localDeletedDocIds.has(name) ||
@@ -1019,13 +1206,14 @@ export default function App() {
           setDocuments([]);
         }
 
-
-
         const { data: remoteFolders, error: folderErr } = await supabase.from('folders').select('*');
         if (!folderErr && remoteFolders && remoteFolders.length > 0) {
           const normalizedFolders: FolderItem[] = remoteFolders.map((f: any) => {
             const isSoftDeleted =
               Boolean(f.is_deleted) ||
+              f.is_deleted === 'true' ||
+              f.status === 'moved to bin' ||
+              f.status === 'deleted' ||
               Boolean(f.isDeleted) ||
               localDeletedFolderIds.has(f.id) ||
               localDeletedFolderIds.has(f.name) ||
@@ -1389,7 +1577,15 @@ export default function App() {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    const targetUser = users.find((u) => u.id === userId || u.email === userId);
+    setUsers((prev) => prev.filter((u) => u.id !== userId && u.email !== userId));
+
+    const isCurrentActiveUser =
+      activeUserProfile &&
+      (activeUserProfile.id === userId ||
+        activeUserProfile.email?.toLowerCase() === userId.toLowerCase() ||
+        (targetUser && targetUser.email?.toLowerCase() === activeUserProfile.email?.toLowerCase()));
+
     try {
       if (isValidUUID(userId)) {
         await supabase.from('profiles').delete().eq('id', userId);
@@ -1399,6 +1595,13 @@ export default function App() {
     } catch (e) {
       console.warn('Failed to delete user profile from DB:', e);
     }
+
+    if (isCurrentActiveUser) {
+      showToast('Your user account was deleted. Signing out...');
+      await handleLogout();
+      return;
+    }
+
     showToast('User account deleted');
   };
 
@@ -1676,9 +1879,17 @@ export default function App() {
     showToast(`Moved folder "${folderToDelete.name}" to Recycle Bin`);
 
     try {
-      await supabase.from('folders').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('id', idsToSoftDelete);
-      await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('folder_id', idsToSoftDelete);
-      await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).in('folder_id', idsToSoftDelete);
+      await supabase.from('folders').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).in('id', idsToSoftDelete);
+      await supabase.from('documents').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).in('folder_id', idsToSoftDelete);
+      await supabase.from('files').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).in('folder_id', idsToSoftDelete);
+
+      // Unpin deleted folders from DB and state
+      setPinnedFolderIds((prev) => prev.filter((id) => !idsToSoftDelete.includes(id)));
+      if (activeUserProfile?.id) {
+        for (const fid of idsToSoftDelete) {
+          await supabase.from('user_folder_pins').delete().eq('user_id', activeUserProfile.id).eq('folder_id', fid);
+        }
+      }
     } catch (e) {
       // ignore offline fallback
     }
@@ -1841,27 +2052,32 @@ export default function App() {
 
   // Selection handlers
   const handleToggleSelectFolder = (id: string, multiSelect: boolean = false) => {
+    if (justMarqueeDraggedRef.current) return;
     if (multiSelect) {
       setSelectedFolderIds((prev) =>
         prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
       );
     } else {
-      setSelectedFolderIds((prev) => (prev.length === 1 && prev[0] === id ? [] : [id]));
+      setSelectedFolderIds([id]);
+      setSelectedDocIds([]);
     }
   };
 
   const handleFolderClick = (folderId: string) => {
+    if (justMarqueeDraggedRef.current) return;
     setCurrentFolderId(folderId);
     setActiveNav('documents');
   };
 
   const handleToggleSelectDoc = (id: string, multiSelect: boolean = false) => {
+    if (justMarqueeDraggedRef.current) return;
     if (multiSelect) {
       setSelectedDocIds((prev) =>
         prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
       );
     } else {
-      setSelectedDocIds((prev) => (prev.length === 1 && prev[0] === id ? [] : [id]));
+      setSelectedDocIds([id]);
+      setSelectedFolderIds([]);
     }
   };
 
@@ -1870,6 +2086,63 @@ export default function App() {
       setSelectedDocIds([]);
     } else {
       setSelectedDocIds(filteredAndSortedDocuments.map((d) => d.id));
+    }
+  };
+
+  // Fetch Student Details for Current Folder Academic Path Context
+  const [isFetchingStudentDetails, setIsFetchingStudentDetails] = useState(false);
+
+  const handleFetchStudentDetails = async () => {
+    if (currentUser.role === 'student') {
+      showToast('Students cannot export student lists.');
+      return;
+    }
+
+    setIsFetchingStudentDetails(true);
+    try {
+      // 1. Resolve complete academic context from folder parent hierarchy
+      const context = resolveFolderAcademicContext(currentFolderId, computedFolders);
+
+      // 2. Security / Permission Check for Admin / Lecturer
+      const authResult = checkLecturerScopeAuthorization(
+        currentUser.id,
+        currentUser.role,
+        context,
+        lecturerAssignments
+      );
+
+      if (!authResult.authorized) {
+        showToast(authResult.reason || 'Unauthorized to fetch student details for this folder.');
+        setIsFetchingStudentDetails(false);
+        return;
+      }
+
+      // 3. Query matching student profiles in database
+      const students = await fetchStudentsByScope(context);
+
+      if (students.length === 0) {
+        showToast(`No students found for: ${context.pathDisplay}`);
+        setIsFetchingStudentDetails(false);
+        return;
+      }
+
+      // 4. Generate & download Excel file with contextual filename
+      const filename = exportFolderStudentDetailsToExcel(students, context);
+
+      // 5. Activity log
+      logActivity({
+        userId: currentUser.id,
+        userName: currentUser.name,
+        action: 'DOWNLOAD',
+        details: `Exported ${students.length} student records for ${context.pathDisplay} (${filename})`,
+      });
+
+      showToast(`${students.length} student record(s) exported successfully!`);
+    } catch (err: any) {
+      console.error('Error fetching student details:', err);
+      showToast('Failed to export student details.');
+    } finally {
+      setIsFetchingStudentDetails(false);
     }
   };
 
@@ -1912,7 +2185,7 @@ export default function App() {
     } else if (doc.type === 'doc') {
       extension = '.docx';
       mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    } else if (doc.type === 'spec') {
+    } else if (doc.type === 'spec' || doc.type === 'presentation') {
       extension = '.pptx';
       mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
     }
@@ -1952,13 +2225,13 @@ export default function App() {
 
       try {
         if (isValidUUID(id)) {
-          await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
-          await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
+          await supabase.from('documents').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
+          await supabase.from('files').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).eq('id', id);
         }
         if (docName) {
-          await supabase.from('documents').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('name', docName);
-          await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('original_filename', docName);
-          await supabase.from('files').update({ is_deleted: true, deleted_at: now, deleted_by: userName }).eq('name', docName);
+          await supabase.from('documents').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).eq('name', docName);
+          await supabase.from('files').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).eq('original_filename', docName);
+          await supabase.from('files').update({ status: 'moved to bin', is_deleted: true, deleted_at: now, deleted_by: userName }).eq('name', docName);
         }
       } catch (e) {
         console.warn('Supabase documents soft-delete warning:', e);
@@ -2007,13 +2280,13 @@ export default function App() {
 
     try {
       if (isValidUUID(docId)) {
-        await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
-        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
+        await supabase.from('documents').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
+        await supabase.from('files').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', docId);
       }
       if (docName) {
-        await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', docName);
-        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('original_filename', docName);
-        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', docName);
+        await supabase.from('documents').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', docName);
+        await supabase.from('files').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('original_filename', docName);
+        await supabase.from('files').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', docName);
       }
     } catch (e) {}
   };
@@ -2038,12 +2311,12 @@ export default function App() {
 
     try {
       if (isValidUUID(folderId)) {
-        await supabase.from('folders').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', folderId);
-        await supabase.from('documents').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('folder_id', folderId);
-        await supabase.from('files').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('folder_id', folderId);
+        await supabase.from('folders').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', folderId);
+        await supabase.from('documents').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('folder_id', folderId);
+        await supabase.from('files').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('folder_id', folderId);
       }
       if (folderName) {
-        await supabase.from('folders').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', folderName);
+        await supabase.from('folders').update({ status: 'active', is_deleted: false, deleted_at: null, deleted_by: null }).eq('name', folderName);
       }
     } catch (e) {}
   };
@@ -2108,6 +2381,7 @@ export default function App() {
           await supabase.from('folders').delete().eq('id', folderId);
           await supabase.from('documents').delete().eq('folder_id', folderId);
           await supabase.from('files').delete().eq('folder_id', folderId);
+          await supabase.from('user_folder_pins').delete().eq('folder_id', folderId);
         }
         if (folderName) {
           await supabase.from('folders').delete().eq('name', folderName);
@@ -2159,6 +2433,7 @@ export default function App() {
             await supabase.from('folders').delete().eq('id', folder.id);
             await supabase.from('documents').delete().eq('folder_id', folder.id);
             await supabase.from('files').delete().eq('folder_id', folder.id);
+            await supabase.from('user_folder_pins').delete().eq('folder_id', folder.id);
           }
           if (folder.name) {
             await supabase.from('folders').delete().eq('name', folder.name);
@@ -2301,9 +2576,6 @@ export default function App() {
     setDocuments((prev) =>
       prev.map((d) => (d.id === id ? { ...d, starred: !d.starred } : d))
     );
-    if (previewDoc && previewDoc.id === id) {
-      setPreviewDoc((prev) => (prev ? { ...prev, starred: !prev.starred } : null));
-    }
   };
 
   if (!isAuthenticated) {
@@ -2455,36 +2727,6 @@ export default function App() {
 
           {/* Quick Actions in Header */}
           <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
-            {/* Control Panel Role Badge */}
-            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-bold shrink-0">
-              {currentUser.role === 'admin' ? (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5 text-purple-500" />
-                  <span className="text-purple-600 dark:text-purple-400">Admin Mode</span>
-                </>
-              ) : currentUser.role === 'uploader' ? (
-                <>
-                  <UploadCloud className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-amber-600 dark:text-amber-400">Lecturer Mode</span>
-                </>
-              ) : (
-                <>
-                  <UserCheck className="w-3.5 h-3.5 text-blue-500" />
-                  <span className="text-blue-600 dark:text-blue-400">Student Mode</span>
-                </>
-              )}
-            </div>
-
-            {canUserModifyFolder && (
-              <button
-                onClick={() => setIsNewDocModalOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="hidden xs:inline font-semibold">New File</span>
-              </button>
-            )}
-
             {/* Top-Right User Account Avatar Menu */}
             <HeaderAccountMenu
               user={activeUserProfile || currentUser}
@@ -2515,16 +2757,21 @@ export default function App() {
               users={users}
               folders={folders}
               documents={documents}
+              lecturerAssignments={lecturerAssignments}
               onUpdateUserRole={handleUpdateUserRole}
               onAddUser={handleAddUser}
               onDeleteUser={handleDeleteUser}
               onCreateFolder={handleCreateFolder}
+              onAddAssignment={handleAddAssignment}
+              onDeleteAssignment={handleDeleteAssignment}
             />
           ) : activeNav === 'lecturer-panel' ? (
             <LecturerPanel
               documents={documents}
               folders={computedFolders}
+              assignments={lecturerAssignments}
               currentLecturerName={currentUser.name}
+              currentUserId={currentUser.id}
               onAddDocument={handleAddDocument}
               onDeleteDocument={handleDeleteDoc}
               onToggleImportant={handleMarkImportant}
@@ -2535,7 +2782,6 @@ export default function App() {
                 setActiveNav(key);
                 if (key !== 'documents') setCurrentFolderId(null);
               }}
-              onPreviewDoc={(doc) => setPreviewDoc(doc)}
               onDownloadDoc={handleDownloadDoc}
               documents={documents}
             />
@@ -2581,7 +2827,24 @@ export default function App() {
                 onSearchChange={setSearchQuery}
                 canModify={canUserModifyFolder}
               />
-              <div className="px-4 sm:px-6 md:px-8">
+              <div
+                ref={fileDirectoryContainerRef}
+                onMouseDown={handleMarqueeMouseDown}
+                onClickCapture={handleContainerClickCapture}
+                className="relative px-4 sm:px-6 md:px-8 space-y-4 pb-16"
+              >
+                {/* Visual Marquee Selection Rubberband Rectangle */}
+                {marqueeBox && (
+                  <div
+                    className="absolute z-50 pointer-events-none bg-blue-500/20 dark:bg-blue-500/30 border border-blue-500/80 rounded-xs shadow-xs transition-none"
+                    style={{
+                      left: `${marqueeBox.left}px`,
+                      top: `${marqueeBox.top}px`,
+                      width: `${marqueeBox.width}px`,
+                      height: `${marqueeBox.height}px`,
+                    }}
+                  />
+                )}
                 <PinnedFoldersView
                   pinnedFolderIds={pinnedFolderIds}
                   folders={computedFolders}
@@ -2606,7 +2869,6 @@ export default function App() {
           ) : activeNav === 'recent-files' ? (
             <RecentFilesView
               documents={documents}
-              onPreviewDoc={(doc) => setPreviewDoc(doc)}
               onDownloadDoc={handleDownloadDoc}
             />
           ) : activeNav === 'announcements' ? (
@@ -2638,6 +2900,8 @@ export default function App() {
                 sortOrder={sortOrder}
                 searchQuery={searchQuery}
                 pinnedFolderIds={pinnedFolderIds}
+                userRole={currentUser.role}
+                isFetchingStudentDetails={isFetchingStudentDetails}
                 onNavigateToFolder={setCurrentFolderId}
                 onCreateFolder={handleCreateFolder}
                 onRenameFolder={handleRenameFolder}
@@ -2648,6 +2912,7 @@ export default function App() {
                 onDownloadSelected={handleDownloadSelected}
                 onDeleteSelected={handleDeleteSelected}
                 onTogglePinFolder={handleTogglePinFolder}
+                onFetchStudentDetails={handleFetchStudentDetails}
                 onViewModeChange={setViewMode}
                 onSortFieldChange={setSortField}
                 onSortOrderChange={setSortOrder}
@@ -2657,6 +2922,9 @@ export default function App() {
               />
 
               <div
+                ref={fileDirectoryContainerRef}
+                onMouseDown={handleMarqueeMouseDown}
+                onClickCapture={handleContainerClickCapture}
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -2668,8 +2936,20 @@ export default function App() {
                     handleDropUploadFiles(currentFolderId, Array.from(e.dataTransfer.files));
                   }
                 }}
-                className="relative px-4 sm:px-6 md:px-8 space-y-4 min-h-[300px]"
+                className="relative px-4 sm:px-6 md:px-8 space-y-4 pb-16"
               >
+                {/* Visual Marquee Selection Rubberband Rectangle */}
+                {marqueeBox && (
+                  <div
+                    className="absolute z-50 pointer-events-none bg-blue-500/20 dark:bg-blue-500/30 border border-blue-500/80 rounded-xs shadow-xs transition-none"
+                    style={{
+                      left: `${marqueeBox.left}px`,
+                      top: `${marqueeBox.top}px`,
+                      width: `${marqueeBox.width}px`,
+                      height: `${marqueeBox.height}px`,
+                    }}
+                  />
+                )}
 
               {/* Title Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-2">
@@ -2782,7 +3062,7 @@ export default function App() {
                     selectedIds={selectedDocIds}
                     onToggleSelect={handleToggleSelectDoc}
                     onToggleSelectAll={handleToggleSelectAll}
-                    onDocumentClick={(doc) => setPreviewDoc(doc)}
+                    onDocumentClick={(doc) => handleDownloadDoc(doc)}
                     sortField={sortField}
                     sortOrder={sortOrder}
                     onSortChange={handleSortChange}
@@ -2797,7 +3077,7 @@ export default function App() {
                     hasActiveSelection={selectedDocIds.length > 0}
                     canModify={canUserModifyFolder}
                     onToggleSelect={handleToggleSelectDoc}
-                    onDocumentClick={(doc) => setPreviewDoc(doc)}
+                    onDocumentClick={(doc) => handleDownloadDoc(doc)}
                     onDownload={handleDownloadDoc}
                     onDelete={canUserModifyFolder ? handleDeleteDoc : undefined}
                     onRenameDoc={handleRenameDoc}
@@ -2827,18 +3107,6 @@ export default function App() {
             : handleDeleteSelected
         }
         canDelete={canUserModifyFolder}
-      />
-
-      {/* Document Detail Preview Modal */}
-      <DocumentPreviewModal
-        document={previewDoc}
-        isOpen={!!previewDoc}
-        onClose={() => setPreviewDoc(null)}
-        onDownload={handleDownloadDoc}
-        onToggleStar={handleToggleStar}
-        folders={computedFolders}
-        onMoveDocToFolder={handleMoveDocToFolder}
-        userRole={currentUser?.role}
       />
 
       {/* Create / Upload New Document Modal */}

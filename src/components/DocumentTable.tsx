@@ -7,7 +7,6 @@ import {
   FileText,
   Download,
   Trash2,
-  Eye,
 } from 'lucide-react';
 import { DocumentItem } from '../types';
 
@@ -85,7 +84,8 @@ const DocumentTableRow: React.FC<DocumentTableRowProps> = ({
       if (hasActiveSelection || isSelected) {
         onToggleSelect(doc.id, true);
       } else {
-        onDocumentClick(doc);
+        if (onDownload) onDownload(doc);
+        else onDocumentClick(doc);
       }
     } else {
       // PC View: 1-click selects file & enables options bar, Ctrl/Cmd + Click for multi-select
@@ -98,12 +98,14 @@ const DocumentTableRow: React.FC<DocumentTableRowProps> = ({
     const isMobile = window.innerWidth < 768;
     if (!isMobile) {
       e.stopPropagation();
-      onDocumentClick(doc);
+      if (onDownload) onDownload(doc);
+      else onDocumentClick(doc);
     }
   };
 
   return (
     <tr
+      data-doc-id={doc.id}
       role="row"
       aria-selected={isSelected}
       onClick={handleClick}
@@ -115,7 +117,8 @@ const DocumentTableRow: React.FC<DocumentTableRowProps> = ({
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          onDocumentClick(doc);
+          if (onDownload) onDownload(doc);
+          else onDocumentClick(doc);
         } else if (e.key === ' ') {
           e.preventDefault();
           const isMulti = e.ctrlKey || e.metaKey;
@@ -188,19 +191,11 @@ const DocumentTableRow: React.FC<DocumentTableRowProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={() => onDocumentClick(doc)}
-            className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded-none hover:bg-neutral-200/50 dark:hover:bg-neutral-800 transition-colors"
-            title="Preview"
-            aria-label="Preview document"
-          >
-            <Eye className="w-3.5 h-3.5 shrink-0" />
-          </button>
           {onDownload && (
             <button
               onClick={() => onDownload(doc)}
               className="w-7 h-7 flex items-center justify-center shrink-0 border border-transparent text-neutral-400 hover:text-neutral-700 dark:hover:text-white rounded-none hover:bg-neutral-200/50 dark:hover:bg-neutral-800 transition-colors"
-              title="Download"
+              title="Download File"
               aria-label="Download document"
             >
               <Download className="w-3.5 h-3.5 shrink-0" />

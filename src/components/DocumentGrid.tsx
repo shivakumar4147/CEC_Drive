@@ -127,6 +127,7 @@ const DocumentGridItem: React.FC<{
   canModify?: boolean;
   onToggleSelect: (id: string, multiSelect?: boolean) => void;
   onDocumentClick: (doc: DocumentItem) => void;
+  onDownload?: (doc: DocumentItem) => void;
   onRenameDoc?: (id: string, newName: string) => void;
 }> = ({
   doc,
@@ -135,6 +136,7 @@ const DocumentGridItem: React.FC<{
   canModify = true,
   onToggleSelect,
   onDocumentClick,
+  onDownload,
   onRenameDoc,
 }) => {
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -216,7 +218,8 @@ const DocumentGridItem: React.FC<{
       if (hasActiveSelection || isSelected) {
         onToggleSelect(doc.id, true);
       } else {
-        onDocumentClick(doc);
+        if (onDownload) onDownload(doc);
+        else onDocumentClick(doc);
       }
     } else {
       // PC View: 1-click selects file & enables options, Ctrl/Cmd + Click toggles multi-select
@@ -229,7 +232,8 @@ const DocumentGridItem: React.FC<{
     const isMobile = window.innerWidth < 768;
     if (!isMobile) {
       e.stopPropagation();
-      onDocumentClick(doc);
+      if (onDownload) onDownload(doc);
+      else onDocumentClick(doc);
     }
   };
 
@@ -243,6 +247,7 @@ const DocumentGridItem: React.FC<{
 
   return (
     <div
+      data-doc-id={doc.id}
       draggable={canModify}
       onDragStart={handleDragStart}
       onClick={handleClick}
@@ -256,7 +261,8 @@ const DocumentGridItem: React.FC<{
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          onDocumentClick(doc);
+          if (onDownload) onDownload(doc);
+          else onDocumentClick(doc);
         } else if (e.key === ' ') {
           e.preventDefault();
           const isMulti = e.ctrlKey || e.metaKey;
@@ -319,6 +325,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   canModify = true,
   onToggleSelect,
   onDocumentClick,
+  onDownload,
   onRenameDoc,
 }) => {
   return (
@@ -335,6 +342,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
           canModify={canModify}
           onToggleSelect={onToggleSelect}
           onDocumentClick={onDocumentClick}
+          onDownload={onDownload}
           onRenameDoc={onRenameDoc}
         />
       ))}

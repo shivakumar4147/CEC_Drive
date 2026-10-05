@@ -14,10 +14,38 @@ export interface UserProfile {
   name: string;
   email: string;
   role: UserRole;
+  usn?: string;
+  academic_year?: string;
   department?: string;
+  semester?: string;
   section?: string;
+  course?: string;
+  status?: string;
   initial: string;
   bgColor: string;
+}
+
+export interface StudentProfile {
+  id: string;
+  name: string;
+  email: string;
+  usn: string;
+  academic_year: string;
+  department: string;
+  semester: string;
+  section: string;
+  created_at?: string;
+}
+
+export interface LecturerAssignment {
+  id: string;
+  lecturer_id: string;
+  department: string;
+  section: string;
+  course: string;
+  academic_year: string;
+  semester: string;
+  created_at?: string;
 }
 
 export interface FileItem {

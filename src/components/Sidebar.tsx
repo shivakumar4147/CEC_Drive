@@ -15,6 +15,7 @@ import {
   Moon,
   ShieldCheck,
   UploadCloud,
+  UserCheck,
   Trash2,
 } from 'lucide-react';
 import { SynapseLogo } from './SynapseLogo';
@@ -113,18 +114,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     currentUser.role === 'admin'
       ? {
           label: 'Admin Dashboard',
-          icon: <ShieldCheck className="w-4 h-4 text-purple-500" />,
+          icon: <ShieldCheck className="w-4 h-4" />,
           targetKey: 'admin-panel' as ActiveNavKey,
         }
       : currentUser.role === 'uploader'
       ? {
           label: 'Lecturer Hub',
-          icon: <UploadCloud className="w-4 h-4 text-amber-500" />,
+          icon: <UploadCloud className="w-4 h-4" />,
           targetKey: 'lecturer-panel' as ActiveNavKey,
         }
       : {
           label: 'Student Dashboard',
-          icon: <LayoutGrid className="w-4 h-4 text-blue-500" />,
+          icon: <LayoutGrid className="w-4 h-4" />,
           targetKey: 'dashboard' as ActiveNavKey,
         };
 
@@ -205,7 +206,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* Hidden on mobile when bottom nav bar is present */}
             <div className="hidden md:block space-y-0.5">
               <NavItem
-                icon={<Calendar className="w-4 h-4 text-indigo-500" />}
+                icon={<Calendar className="w-4 h-4" />}
                 label="Calendar"
                 hasNotification={notifications.calendar}
                 notificationColor="bg-rose-500"
@@ -216,7 +217,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <div>
                 <CollapsibleHeader
-                  icon={<Pin className="w-4 h-4 text-amber-500 fill-amber-500/20" />}
+                  icon={<Pin className="w-4 h-4" />}
                   label="Pinned Folder"
                   count={pinnedFolderIds.length}
                   expanded={pinnedExpanded}
@@ -245,7 +246,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           title={f.name}
                         >
                           <div className="flex items-center gap-2 truncate min-w-0">
-                            <FolderIcon className="w-3 h-3 text-amber-500 shrink-0" />
+                            <FolderIcon className="w-3 h-3 shrink-0" />
                             <span className="truncate">{f.name}</span>
                           </div>
                         </button>
@@ -256,7 +257,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
 
               <NavItem
-                icon={<Clock className="w-4 h-4 text-emerald-500" />}
+                icon={<Clock className="w-4 h-4" />}
                 label="Recent Files"
                 hasNotification={notifications.recent}
                 notificationColor="bg-rose-500"
@@ -266,7 +267,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
 
               <NavItem
-                icon={<Megaphone className="w-4 h-4 text-rose-500" />}
+                icon={<Megaphone className="w-4 h-4" />}
                 label="Announcements"
                 hasNotification={notifications.announcements}
                 notificationColor="bg-rose-500"
@@ -279,7 +280,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* Admin-Only Recycle Bin (Trash System - always accessible) */}
             {currentUser.role === 'admin' && (
               <NavItem
-                icon={<Trash2 className="w-4 h-4 text-rose-500" />}
+                icon={<Trash2 className="w-4 h-4" />}
                 label="Recycle Bin"
                 hasNotification={deletedCount > 0}
                 notificationColor="bg-rose-500"
@@ -298,9 +299,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <CollapsibleHeader
             icon={
               foldersExpanded ? (
-                <FolderOpen className="w-4 h-4 text-blue-500 fill-blue-500/20" />
+                <FolderOpen className="w-4 h-4" />
               ) : (
-                <FolderIcon className="w-4 h-4 text-blue-500 fill-blue-500/20" />
+                <FolderIcon className="w-4 h-4" />
               )
             }
             label="Root Folders"
@@ -366,7 +367,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Account Profile Card */}
         <div className="relative group px-2">
           <div
-            title={collapsed ? currentUser.name : undefined}
+            title={collapsed ? `${currentUser.name} (${currentUser.role === 'admin' ? 'Admin Mode' : currentUser.role === 'uploader' ? 'Lecturer Mode' : 'Student Mode'})` : undefined}
             className={`w-full flex items-center py-2 rounded-xl text-sm font-medium transition-all text-neutral-600 dark:text-neutral-400 ${
               collapsed ? 'justify-center px-0' : 'px-3'
             }`}
@@ -376,24 +377,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 collapsed ? 'justify-center w-auto' : 'justify-between w-full'
               } shrink-0`}
             >
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <span
                   className={`w-7 h-7 rounded-full ${currentUser.bgColor} text-white flex items-center justify-center font-bold text-xs shrink-0`}
                 >
                   {currentUser.initial}
                 </span>
                 {!collapsed && (
-                  <div className="min-w-0 flex-1 truncate text-left">
+                  <div className="min-w-0 flex-1 truncate text-left space-y-0.5">
                     <p className="text-xs font-semibold text-neutral-900 dark:text-white truncate whitespace-nowrap">
                       {currentUser.name}
                     </p>
-                    <p className="text-[11px] text-neutral-400 dark:text-neutral-500 truncate whitespace-nowrap capitalize">
-                      {currentUser.role === 'uploader'
-                        ? 'Lecturer • Uploader'
-                        : currentUser.role === 'admin'
-                        ? 'System Administrator'
-                        : `${currentUser.department || 'CSE'} • ${currentUser.section || 'Sec A'}`}
-                    </p>
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      {currentUser.role === 'admin' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-[10px] font-bold text-purple-700 dark:text-purple-300">
+                          <ShieldCheck className="w-3 h-3 text-purple-500 shrink-0" />
+                          <span>Admin Mode</span>
+                        </span>
+                      ) : currentUser.role === 'uploader' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                          <UploadCloud className="w-3 h-3 text-amber-500 shrink-0" />
+                          <span>Lecturer Mode</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                          <UserCheck className="w-3 h-3 text-blue-500 shrink-0" />
+                          <span>Student Mode</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

@@ -37,8 +37,8 @@ export const PinnedFoldersView: React.FC<PinnedFoldersViewProps> = ({
   onDropItem,
   canModify = true,
 }) => {
-  // Pinned folder objects
-  let pinnedFolders = folders.filter((f) => pinnedFolderIds.includes(f.id));
+  // Pinned folder objects (filtering out soft-deleted / moved-to-bin folders)
+  let pinnedFolders = folders.filter((f) => pinnedFolderIds.includes(f.id) && !f.isDeleted);
 
   if (searchQuery.trim()) {
     const q = searchQuery.toLowerCase();

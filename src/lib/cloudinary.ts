@@ -379,11 +379,72 @@ export async function saveDocumentWithCloudinary(docData: {
 }
 
 /**
+ * Helper to resolve download filename, extension, and MIME type based on document metadata
+ */
+export function resolveDownloadFilenameAndMime(
+  doc: { name: string; type?: string; mimeType?: string; originalFilename?: string },
+  fileRecord?: { original_filename?: string; mime_type?: string; resource_type?: string } | null
+): { filename: string; mimeType: string } {
+  const rawName = fileRecord?.original_filename || doc.originalFilename || doc.name || 'download';
+  let mimeType = fileRecord?.mime_type || doc.mimeType || '';
+
+  // Extract extension from rawName if present
+  const extMatch = rawName.match(/\.([a-zA-Z0-9]+)$/);
+  let ext = extMatch ? extMatch[1].toLowerCase() : '';
+
+  // If rawName has no extension, map from doc.type or mimeType
+  if (!ext) {
+    if (doc.type === 'doc' || mimeType.includes('word') || mimeType.includes('msword')) {
+      ext = 'docx';
+      mimeType = mimeType || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (doc.type === 'presentation' || doc.type === 'spec' || mimeType.includes('presentation') || mimeType.includes('powerpoint')) {
+      ext = 'pptx';
+      mimeType = mimeType || 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    } else if (doc.type === 'sheet' || mimeType.includes('sheet') || mimeType.includes('excel')) {
+      ext = 'xlsx';
+      mimeType = mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    } else if (doc.type === 'pdf' || mimeType.includes('pdf')) {
+      ext = 'pdf';
+      mimeType = mimeType || 'application/pdf';
+    } else {
+      ext = 'pdf';
+      mimeType = mimeType || 'application/pdf';
+    }
+  }
+
+  // Ensure appropriate MIME type based on extension
+  if (!mimeType) {
+    if (['doc', 'docx'].includes(ext)) {
+      mimeType = ext === 'doc' ? 'application/msword' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (['ppt', 'pptx'].includes(ext)) {
+      mimeType = ext === 'ppt' ? 'application/vnd.ms-powerpoint' : 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    } else if (['xls', 'xlsx'].includes(ext)) {
+      mimeType = ext === 'xls' ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    } else if (ext === 'pdf') {
+      mimeType = 'application/pdf';
+    } else if (['jpg', 'jpeg'].includes(ext)) {
+      mimeType = 'image/jpeg';
+    } else if (ext === 'png') {
+      mimeType = 'image/png';
+    } else if (ext === 'zip') {
+      mimeType = 'application/zip';
+    } else if (ext === 'txt') {
+      mimeType = 'text/plain';
+    } else {
+      mimeType = 'application/octet-stream';
+    }
+  }
+
+  const filename = extMatch ? rawName : `${rawName}.${ext}`;
+  return { filename, mimeType };
+}
+
+/**
  * 6. AUTHENTICATED FILE DOWNLOAD HANDLER
- * Sequence: Student clicks Download -> Supabase Auth -> Check file permission in DB -> Get verified Cloudinary URL -> Download
+ * Sequence: Student clicks Download -> Supabase Auth -> Check file permission in DB -> Get verified Cloudinary URL -> Download with original format/extension
  */
 export async function handleSecureFileDownload(
-  doc: { id: string; name: string; fileUrl?: string; cloudinaryPublicId?: string },
+  doc: { id: string; name: string; type?: string; mimeType?: string; originalFilename?: string; fileUrl?: string; cloudinaryPublicId?: string },
   currentUserProfile?: { id?: string; email?: string; role?: string } | null
 ): Promise<{ success: boolean; url?: string; message?: string }> {
   try {
@@ -393,7 +454,7 @@ export async function handleSecureFileDownload(
     // Step 2: Query Supabase DB for verified file record & permissions
     const { data: fileRecord } = await supabase
       .from('files')
-      .select('cloudinary_url, cloudinary_public_id, original_filename')
+      .select('cloudinary_url, cloudinary_public_id, original_filename, mime_type, resource_type')
       .eq('id', doc.id)
       .maybeSingle();
 
@@ -421,9 +482,8 @@ export async function handleSecureFileDownload(
       };
     }
 
-    // Step 3: Execute secure browser download of the exact original PDF/file binary
-    const downloadFileName = fileRecord?.original_filename || doc.name;
-    const pdfFileName = downloadFileName.toLowerCase().endsWith('.pdf') ? downloadFileName : `${downloadFileName}.pdf`;
+    // Step 3: Resolve exact filename and MIME type (Word .docx, PPT .pptx, Excel .xlsx, PDF .pdf, etc.)
+    const { filename: targetFileName, mimeType: targetMimeType } = resolveDownloadFilenameAndMime(doc, fileRecord);
 
     try {
       // 1. Try fetching the verified URL directly
@@ -440,11 +500,11 @@ export async function handleSecureFileDownload(
 
       if (res.ok) {
         const blob = await res.blob();
-        const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-        const blobUrl = URL.createObjectURL(pdfBlob);
+        const fileBlob = blob.type && blob.type !== 'text/html' ? blob : new Blob([blob], { type: targetMimeType });
+        const blobUrl = URL.createObjectURL(fileBlob);
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = pdfFileName;
+        link.download = targetFileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -452,7 +512,7 @@ export async function handleSecureFileDownload(
       } else {
         const link = document.createElement('a');
         link.href = verifiedUrl;
-        link.download = pdfFileName;
+        link.download = targetFileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -461,7 +521,7 @@ export async function handleSecureFileDownload(
       console.warn('Direct fetch download error:', fetchErr);
       const link = document.createElement('a');
       link.href = verifiedUrl;
-      link.download = pdfFileName;
+      link.download = targetFileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -474,7 +534,7 @@ export async function handleSecureFileDownload(
       action: 'DOWNLOAD',
       fileId: doc.id,
       fileName: doc.name,
-      details: `Downloaded "${doc.name}"`,
+      details: `Downloaded "${doc.name}" as ${targetFileName}`,
     });
 
     return {

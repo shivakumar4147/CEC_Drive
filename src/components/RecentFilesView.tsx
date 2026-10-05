@@ -1,16 +1,15 @@
 import React from 'react';
-import { Clock, FileText, Download, Eye, Tag } from 'lucide-react';
+import { Clock, FileText, Download } from 'lucide-react';
 import { DocumentItem } from '../types';
 
 interface RecentFilesViewProps {
   documents: DocumentItem[];
-  onPreviewDoc: (doc: DocumentItem) => void;
+  onPreviewDoc?: (doc: DocumentItem) => void;
   onDownloadDoc: (doc: DocumentItem) => void;
 }
 
 export const RecentFilesView: React.FC<RecentFilesViewProps> = ({
   documents,
-  onPreviewDoc,
   onDownloadDoc,
 }) => {
   return (
@@ -32,7 +31,8 @@ export const RecentFilesView: React.FC<RecentFilesViewProps> = ({
         {documents.map((doc) => (
           <div
             key={doc.id}
-            className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors group"
+            onClick={() => onDownloadDoc(doc)}
+            className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors group cursor-pointer"
           >
             <div className="flex items-center gap-3.5 min-w-0">
               <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 shrink-0">
@@ -65,14 +65,7 @@ export const RecentFilesView: React.FC<RecentFilesViewProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-              <button
-                onClick={() => onPreviewDoc(doc)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
-              >
-                <Eye className="w-3.5 h-3.5 text-blue-500" />
-                <span>Preview</span>
-              </button>
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto" onClick={(e) => e.stopPropagation()}>
               <button
                 onClick={() => onDownloadDoc(doc)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors"

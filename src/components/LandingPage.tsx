@@ -35,7 +35,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onLoginSuccess,
 }) => {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
-  const [selectedRole, setSelectedRole] = useState<'student' | 'uploader'>('student');
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [resetSubmitted, setResetSubmitted] = useState(false);
   const [resetIdentifier, setResetIdentifier] = useState('');
@@ -46,7 +45,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Student Form State
+  // Student Registration Form State
   const [studentName, setStudentName] = useState('');
   const [studentUSN, setStudentUSN] = useState('');
   const [studentAcademicYear, setStudentAcademicYear] = useState('');
@@ -54,35 +53,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [studentSem, setStudentSem] = useState('');
   const [studentSec, setStudentSec] = useState('');
 
-  // Lecturer Form State
-  const [lecturerName, setLecturerName] = useState('');
-  const [lecturerDept, setLecturerDept] = useState('');
-  const [lecturerCourse, setLecturerCourse] = useState('');
-
-  // Helper function to write to Supabase public.profiles table
-  const saveProfileToSupabase = async (userId: string, userEmail: string, role: UserRole) => {
+  // Helper function to write student profile to Supabase public.profiles table
+  const saveProfileToSupabase = async (userId: string, userEmail: string) => {
     try {
-      const fullPayload: any =
-        role === 'student'
-          ? {
-              id: userId,
-              email: userEmail,
-              name: studentName || 'Student',
-              role: 'student',
-              usn: studentUSN || null,
-              academic_year: studentAcademicYear || null,
-              department: studentDept || 'CSE',
-              semester: studentSem || null,
-              section: studentSec || 'Sec A',
-            }
-          : {
-              id: userId,
-              email: userEmail,
-              name: lecturerName || 'Lecturer',
-              role: 'uploader',
-              department: lecturerDept || 'CSE',
-              course: lecturerCourse || null,
-            };
+      const fullPayload = {
+        id: userId,
+        email: userEmail,
+        name: studentName || 'Student',
+        role: 'student',
+        usn: studentUSN.trim().toUpperCase() || null,
+        academic_year: studentAcademicYear || null,
+        department: studentDept || 'CSE',
+        semester: studentSem || null,
+        section: studentSec || 'Sec A',
+        status: 'active',
+      };
 
       const { error: fullErr } = await supabase.from('profiles').upsert(fullPayload, { onConflict: 'id' });
       if (fullErr) {
@@ -90,9 +75,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         const minimalPayload = {
           id: userId,
           email: userEmail,
-          name: role === 'student' ? studentName || 'Student' : lecturerName || 'Lecturer',
-          role: role,
-          usn: role === 'student' ? studentUSN || null : null,
+          name: studentName || 'Student',
+          role: 'student',
+          usn: studentUSN.trim().toUpperCase() || null,
         };
         await supabase.from('profiles').upsert(minimalPayload, { onConflict: 'id' });
       }
@@ -117,12 +102,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     try {
       if (authMode === 'signin') {
         // ==========================================
-        // STRICT SIGN IN MODE: Verify Email in DB
+        // STRICT SIGN IN MODE: Database Role Verification
         // ==========================================
         try {
           const { data: existingProfile } = await supabase
             .from('profiles')
-            .select('id, email')
+            .select('id, email, role')
             .eq('email', activeEmail.toLowerCase())
             .maybeSingle();
 
@@ -158,13 +143,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         if (signInData?.user) {
           const meta = signInData.user.user_metadata || {};
-          let detectedRole: UserRole | undefined = meta.role ? normalizeUserRole(meta.role) : undefined;
+          let detectedRole: UserRole = 'student';
 
           // Query canonical user role from public.profiles database table by ID or Email
           try {
             const { data: dbProfiles } = await supabase
               .from('profiles')
-              .select('id, role, name, department, section, email')
+              .select('id, role, name, department, section, email, usn, academic_year, semester')
               .or(`id.eq.${signInData.user.id},email.ilike.${activeEmail}`);
 
             const dbProfile = dbProfiles && dbProfiles.length > 0 ? dbProfiles[0] : null;
@@ -172,18 +157,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             if (dbProfile?.role) {
               const parsed = normalizeUserRole(dbProfile.role);
               if (parsed) detectedRole = parsed;
+            } else if (meta.role) {
+              const parsed = normalizeUserRole(meta.role);
+              if (parsed) detectedRole = parsed;
             }
           } catch (profileLookupErr) {
             console.warn('Profile DB lookup during sign in warning:', profileLookupErr);
-          }
-
-          // Fallback logic if role is not in DB or Auth metadata
-          if (!detectedRole) {
-            if (activeEmail.toLowerCase() === 'admin@cec.edu.in' || activeEmail.toLowerCase().includes('admin')) {
-              detectedRole = 'admin';
-            } else {
-              detectedRole = selectedRole === 'student' ? 'student' : 'uploader';
-            }
           }
 
           const userName = meta.name || activeEmail.split('@')[0] || 'User';
@@ -201,14 +180,39 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         }
       } else {
         // ==========================================
-        // CREATE ACCOUNT MODE: Dedicated Registration (Student Only)
+        // CREATE ACCOUNT MODE: Dedicated Student Registration Only
         // Public registration strictly defaults to student role.
         // Lecturer & Admin roles must be granted by Administrator.
         // ==========================================
-        const role = 'student';
+        const normalizedUSN = studentUSN.trim().toUpperCase();
+
+        if (!normalizedUSN) {
+          setAuthError('USN is required for student registration.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Validate USN Uniqueness
+        try {
+          const { data: usnMatch } = await supabase
+            .from('profiles')
+            .select('id, usn')
+            .eq('usn', normalizedUSN)
+            .maybeSingle();
+
+          if (usnMatch) {
+            setAuthError(`USN "${normalizedUSN}" is already registered. Duplicate USNs are not allowed.`);
+            setIsLoading(false);
+            return;
+          }
+        } catch (usnErr) {
+          console.warn('USN check warning:', usnErr);
+        }
+
+        const role: UserRole = 'student';
         const metadata = {
           name: studentName,
-          usn: studentUSN,
+          usn: normalizedUSN,
           role: 'student',
           academic_year: studentAcademicYear,
           department: studentDept,
@@ -234,22 +238,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             setAuthError(signUpError.message);
           }
           setIsLoading(false);
-          return; // Strictly stop execution on sign up error
+          return;
         }
 
         if (signUpData?.user) {
-          await saveProfileToSupabase(signUpData.user.id, signUpData.user.email || activeEmail, role);
-          const userName = (role === 'student' ? studentName : lecturerName) || activeEmail.split('@')[0];
+          await saveProfileToSupabase(signUpData.user.id, signUpData.user.email || activeEmail);
+          const userName = studentName || activeEmail.split('@')[0];
 
           onLoginSuccess(role, {
             id: signUpData.user.id,
             name: userName,
             email: signUpData.user.email || activeEmail,
             role: role,
-            department: role === 'student' ? studentDept || 'CSE' : lecturerDept || 'CSE',
-            section: role === 'student' ? studentSec || 'Sec A' : 'Sec A',
+            usn: normalizedUSN,
+            academic_year: studentAcademicYear,
+            department: studentDept || 'CSE',
+            semester: studentSem,
+            section: studentSec || 'Sec A',
             initial: (userName[0] || 'U').toUpperCase(),
-            bgColor: role === 'student' ? 'bg-blue-600' : 'bg-amber-600',
+            bgColor: 'bg-blue-600',
           });
         }
       }
@@ -400,40 +407,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
           )}
 
-          {/* 2-Role Switcher Tabs */}
-          <div className="grid grid-cols-2 gap-1 bg-neutral-100/70 dark:bg-neutral-900/70 p-1 rounded-xl text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedRole('student');
-                setAuthError(null);
-              }}
-              className={`py-1 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                selectedRole === 'student'
-                  ? 'bg-white dark:bg-neutral-800 text-blue-600 dark:text-blue-400 shadow-xs font-bold'
-                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-            >
-              <GraduationCap className="w-3.5 h-3.5" />
-              <span>Student</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedRole('uploader');
-                setAuthError(null);
-              }}
-              className={`py-1 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                selectedRole === 'uploader'
-                  ? 'bg-white dark:bg-neutral-800 text-amber-600 dark:text-amber-400 shadow-xs font-bold'
-                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-            >
-              <Award className="w-3.5 h-3.5" />
-              <span>Lecturer</span>
-            </button>
-          </div>
-
           {/* AUTH FORM */}
           <form onSubmit={handleSubmit} className="space-y-2.5">
             {authMode === 'signin' ? (
@@ -482,8 +455,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
                 </div>
               </div>
-            ) : selectedRole === 'student' ? (
-              /* CREATE ACCOUNT STUDENT FORM */
+            ) : (
+              /* CREATE ACCOUNT STUDENT FORM ONLY */
               <div className="grid grid-cols-2 gap-2">
                 <div className="col-span-1 space-y-0.5">
                   <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
@@ -514,7 +487,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       value={studentUSN}
                       onChange={(e) => setStudentUSN(e.target.value)}
                       placeholder="e.g. 4CB22CS001"
-                      className="w-full pl-7 pr-1.5 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                      className="w-full pl-7 pr-1.5 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono uppercase"
                     />
                   </div>
                 </div>
@@ -641,115 +614,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
                 </div>
               </div>
-            ) : (
-              /* CREATE ACCOUNT LECTURER FORM */
-              <div className="grid grid-cols-2 gap-2">
-                <div className="col-span-2 space-y-0.5">
-                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                    Faculty Name
-                  </label>
-                  <div className="relative">
-                    <User className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
-                    <input
-                      type="text"
-                      required
-                      value={lecturerName}
-                      onChange={(e) => setLecturerName(e.target.value)}
-                      placeholder="Enter faculty name"
-                      className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="col-span-1 space-y-0.5">
-                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                    Department
-                  </label>
-                  <div className="relative">
-                    <Building2 className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
-                    <select
-                      required
-                      value={lecturerDept}
-                      onChange={(e) => setLecturerDept(e.target.value)}
-                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
-                    >
-                      <option value="" disabled>Select Dept</option>
-                      <option value="CSE">CSE</option>
-                      <option value="ISE">ISE</option>
-                      <option value="ECE">ECE</option>
-                      <option value="EEE">EEE</option>
-                      <option value="MECH">MECH</option>
-                      <option value="AI&DS">AI & DS</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="col-span-1 space-y-0.5">
-                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                    Course Handled
-                  </label>
-                  <div className="relative">
-                    <BookOpen className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
-                    <select
-                      required
-                      value={lecturerCourse}
-                      onChange={(e) => setLecturerCourse(e.target.value)}
-                      className="w-full pl-7 pr-1 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
-                    >
-                      <option value="" disabled>Select Course</option>
-                      <option value="DBMS">DBMS</option>
-                      <option value="SE">SE</option>
-                      <option value="CN">CN</option>
-                      <option value="OS">OS</option>
-                      <option value="AI">AI</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="col-span-2 space-y-0.5">
-                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                    Email Address
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="Enter email address"
-                      className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="col-span-2 space-y-0.5">
-                  <label className="text-[10px] sm:text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-2" />
-                    <input
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Create password"
-                      className="w-full pl-7 pr-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
             )}
 
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full py-2 px-4 text-xs font-bold text-white rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 mt-1 ${
-                selectedRole === 'student'
-                  ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
-                  : 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'
-              } ${isLoading ? 'opacity-80 cursor-not-allowed' : ''}`}
+              className={`w-full py-2 px-4 text-xs font-bold text-white rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 mt-1 bg-blue-600 hover:bg-blue-700 shadow-blue-500/20 ${isLoading ? 'opacity-80 cursor-not-allowed' : ''}`}
             >
               {isLoading ? (
                 <>

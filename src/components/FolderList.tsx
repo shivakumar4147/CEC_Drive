@@ -182,6 +182,7 @@ const FolderListItem: React.FC<{
 
   return (
     <tr
+      data-folder-id={folder.id}
       role="row"
       aria-selected={isSelected}
       draggable={canModify}

@@ -18,8 +18,9 @@ import {
   Search,
   Laptop,
   Pin,
+  FileSpreadsheet,
 } from 'lucide-react';
-import { FolderItem, ViewMode } from '../types';
+import { FolderItem, ViewMode, UserRole } from '../types';
 import { SortField, SortOrder } from './DocumentTable';
 
 interface BreadcrumbPathItem {
@@ -38,6 +39,8 @@ interface FolderToolbarProps {
   sortOrder: SortOrder;
   searchQuery: string;
   pinnedFolderIds?: string[];
+  userRole?: UserRole;
+  isFetchingStudentDetails?: boolean;
   onNavigateToFolder: (folderId: string | null) => void;
   onCreateFolder: (name: string, parentId: string | null) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
@@ -48,6 +51,7 @@ interface FolderToolbarProps {
   onDownloadSelected?: () => void;
   onDeleteSelected?: () => void;
   onTogglePinFolder?: (folderId: string) => void;
+  onFetchStudentDetails?: () => void;
   onViewModeChange: (mode: ViewMode) => void;
   onSortFieldChange: (field: SortField) => void;
   onSortOrderChange: (order: SortOrder) => void;
@@ -67,6 +71,8 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
   sortOrder,
   searchQuery,
   pinnedFolderIds = [],
+  userRole,
+  isFetchingStudentDetails = false,
   onNavigateToFolder,
   onCreateFolder,
   onRenameFolder,
@@ -77,6 +83,7 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
   onDownloadSelected,
   onDeleteSelected,
   onTogglePinFolder,
+  onFetchStudentDetails,
   onViewModeChange,
   onSortFieldChange,
   onSortOrderChange,
@@ -376,6 +383,23 @@ export const FolderToolbar: React.FC<FolderToolbarProps> = ({
               </span>
             )}
           </button>
+
+          {/* Fetch Student Details Button (Admin & Lecturer / Uploader only) */}
+          {(userRole === 'admin' || userRole === 'uploader') && onFetchStudentDetails && (
+            <button
+              onClick={onFetchStudentDetails}
+              disabled={isFetchingStudentDetails}
+              className={`flex items-center justify-center gap-1.5 px-3 h-[32px] shrink-0 rounded-none border transition-all ${
+                isFetchingStudentDetails
+                  ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-700 opacity-80 cursor-wait'
+                  : 'bg-blue-600 hover:bg-blue-700 border-blue-600 text-white font-medium shadow-2xs cursor-pointer'
+              }`}
+              title="Fetch and export student details Excel for current folder academic path"
+            >
+              <FileSpreadsheet className={`w-3.5 h-3.5 shrink-0 ${isFetchingStudentDetails ? 'animate-spin' : ''}`} />
+              <span className="font-semibold">{isFetchingStudentDetails ? 'Fetching...' : 'Fetch Student Details'}</span>
+            </button>
+          )}
 
           {/* Pin / Quick Access Button */}
           <button

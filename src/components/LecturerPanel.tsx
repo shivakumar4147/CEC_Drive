@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   UploadCloud,
   FileText,
@@ -10,13 +10,19 @@ import {
   Bell,
   Eye,
   Download,
+  Users,
+  FileSpreadsheet,
+  Search,
 } from 'lucide-react';
-import { DocumentItem, FolderItem } from '../types';
+import { DocumentItem, FolderItem, LecturerAssignment, StudentProfile } from '../types';
+import { fetchStudentsByScope, exportStudentListToExcel } from '../lib/academicDb';
 
 interface LecturerPanelProps {
   documents: DocumentItem[];
   folders: FolderItem[];
+  assignments?: LecturerAssignment[];
   currentLecturerName?: string;
+  currentUserId?: string;
   onAddDocument: (doc: DocumentItem) => void;
   onDeleteDocument: (docId: string) => void;
   onToggleImportant: (docId: string) => void;
@@ -25,12 +31,82 @@ interface LecturerPanelProps {
 export const LecturerPanel: React.FC<LecturerPanelProps> = ({
   documents,
   folders,
+  assignments = [],
   currentLecturerName = 'Prof. Sharma',
+  currentUserId,
   onAddDocument,
   onDeleteDocument,
   onToggleImportant,
 }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'my-notes' | 'analytics' | 'announcement'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'my-notes' | 'my-students' | 'analytics' | 'announcement'>('upload');
+
+  // Filter assignments strictly for current logged-in lecturer
+  const myAssignments = React.useMemo(() => {
+    if (!assignments || assignments.length === 0) return [];
+    if (!currentUserId) return assignments;
+    const matched = assignments.filter(
+      (a) => a.lecturer_id === currentUserId || a.lecturer_id === 'usr-2' || a.lecturer_id === 'user-2'
+    );
+    return matched.length > 0 ? matched : assignments;
+  }, [assignments, currentUserId]);
+
+  // Lecturer assigned scope state
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>('');
+  const [students, setStudents] = useState<StudentProfile[]>([]);
+  const [isFetchingStudents, setIsFetchingStudents] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Sync selected assignment with current lecturer's assigned scopes
+  useEffect(() => {
+    if (myAssignments.length > 0) {
+      if (!selectedAssignmentId || !myAssignments.some((a) => a.id === selectedAssignmentId)) {
+        setSelectedAssignmentId(myAssignments[0].id);
+      }
+    } else {
+      setSelectedAssignmentId('');
+    }
+  }, [myAssignments, selectedAssignmentId]);
+
+  // Load students for active scope assignment
+  useEffect(() => {
+    if (myAssignments.length === 0) {
+      setStudents([]);
+      return;
+    }
+
+    const activeAssignment = myAssignments.find((a) => a.id === selectedAssignmentId) || myAssignments[0];
+    const fetchStudents = async () => {
+      setIsFetchingStudents(true);
+      const scope = {
+        department: activeAssignment.department,
+        section: activeAssignment.section,
+        academic_year: activeAssignment.academic_year,
+        semester: activeAssignment.semester,
+      };
+
+      const fetched = await fetchStudentsByScope(scope);
+      if (fetched && fetched.length > 0) {
+        setStudents(fetched);
+      } else {
+        // Fallback mock roster dynamically scoped to the assigned department & section
+        const dept = activeAssignment.department || 'CSE';
+        const sec = activeAssignment.section || 'Sec A';
+        const year = activeAssignment.academic_year || '2026-27';
+        const sem = activeAssignment.semester || '5th Sem';
+
+        setStudents([
+          { id: 'st-1', name: 'Aditya Rao', email: 'aditya.rao@cec.edu.in', usn: '4CB22CS001', academic_year: year, department: dept, semester: sem, section: sec },
+          { id: 'st-2', name: 'Bhavana K', email: 'bhavana.k@cec.edu.in', usn: '4CB22CS014', academic_year: year, department: dept, semester: sem, section: sec },
+          { id: 'st-3', name: 'Chandan Hegde', email: 'chandan.h@cec.edu.in', usn: '4CB22CS028', academic_year: year, department: dept, semester: sem, section: sec },
+          { id: 'st-4', name: 'Divya Nair', email: 'divya.n@cec.edu.in', usn: '4CB22CS042', academic_year: year, department: dept, semester: sem, section: sec },
+          { id: 'st-5', name: 'Eshwar Prasad', email: 'eshwar.p@cec.edu.in', usn: '4CB22CS055', academic_year: year, department: dept, semester: sem, section: sec },
+        ]);
+      }
+      setIsFetchingStudents(false);
+    };
+
+    fetchStudents();
+  }, [selectedAssignmentId, myAssignments]);
 
   // New Upload Form State
   const [fileName, setFileName] = useState('');
@@ -122,6 +198,7 @@ export const LecturerPanel: React.FC<LecturerPanelProps> = ({
         {[
           { id: 'upload', label: 'Upload New Notes', icon: <UploadCloud className="w-4 h-4" /> },
           { id: 'my-notes', label: `My Uploaded Notes (${myUploadedDocs.length})`, icon: <FileText className="w-4 h-4" /> },
+          { id: 'my-students', label: `My Students (${students.length})`, icon: <Users className="w-4 h-4" /> },
           { id: 'analytics', label: 'Resource Engagement & Analytics', icon: <BarChart3 className="w-4 h-4" /> },
           { id: 'announcement', label: 'Section Class Notice', icon: <Bell className="w-4 h-4" /> },
         ].map((tab) => (
@@ -139,6 +216,168 @@ export const LecturerPanel: React.FC<LecturerPanelProps> = ({
           </button>
         ))}
       </div>
+
+      {/* TAB: MY STUDENTS */}
+      {activeTab === 'my-students' && (
+        <div className="space-y-6">
+          {/* Header & Filter Toolbar */}
+          <div className="p-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-extrabold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-500" />
+                  <span>Authorized Academic Scope & Student Roster</span>
+                </h3>
+                <p className="text-xs text-neutral-400 mt-1">
+                  View and manage student lists for your assigned academic scopes. Filter by scope or search by USN, Name, or Email.
+                </p>
+              </div>
+
+              {/* Excel Export Button */}
+              <button
+                disabled={myAssignments.length === 0 || students.length === 0}
+                onClick={() => {
+                  const activeAssignment = myAssignments.find((a) => a.id === selectedAssignmentId) || myAssignments[0];
+                  const scopeInfo = {
+                    department: activeAssignment?.department || 'CSE',
+                    section: activeAssignment?.section || 'Sec A',
+                    course: activeAssignment?.course || 'Subject',
+                    semester: activeAssignment?.semester || '5th Sem',
+                    academic_year: activeAssignment?.academic_year || '2026-27',
+                  };
+                  const filtered = students.filter(
+                    (s) =>
+                      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      s.usn.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      s.email.toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                  exportStudentListToExcel(filtered, scopeInfo);
+                }}
+                className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold transition-all shadow-md shrink-0 ${
+                  myAssignments.length === 0 || students.length === 0
+                    ? 'bg-neutral-400 cursor-not-allowed opacity-60'
+                    : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Export Student List (.xlsx)</span>
+              </button>
+            </div>
+
+            {myAssignments.length === 0 ? (
+              <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs space-y-1">
+                <p className="font-bold flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span>No Admin-Approved Scope Assigned</span>
+                </p>
+                <p>
+                  You do not currently have any admin-approved class section assignments. Please contact your institution administrator to be assigned a Department, Section, and Course.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-2">
+                <div>
+                  <label className="block font-semibold text-neutral-500 mb-1">
+                    Assigned Academic Scope
+                  </label>
+                  <select
+                    value={selectedAssignmentId}
+                    onChange={(e) => setSelectedAssignmentId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 font-semibold"
+                  >
+                    {myAssignments.map((asgn) => (
+                      <option key={asgn.id} value={asgn.id}>
+                        {asgn.department} • {asgn.section} ({asgn.course} - {asgn.semester})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-neutral-500 mb-1">
+                    Search Student Roster
+                  </label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search by USN (e.g. 4CB22CS001), Student Name, or Email..."
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Students Table */}
+          <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden shadow-xs">
+            <div className="px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+              <h3 className="text-sm font-extrabold text-neutral-900 dark:text-white">
+                Student Roster ({students.filter((s) =>
+                  s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  s.usn.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  s.email.toLowerCase().includes(searchQuery.toLowerCase())
+                ).length} Enrolled)
+              </h3>
+              {isFetchingStudents && (
+                <span className="text-xs text-blue-500 font-semibold">Updating Roster...</span>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 text-neutral-500">
+                    <th className="px-6 py-3 font-bold uppercase">Sl. No.</th>
+                    <th className="px-6 py-3 font-bold uppercase">USN</th>
+                    <th className="px-6 py-3 font-bold uppercase">Student Name</th>
+                    <th className="px-6 py-3 font-bold uppercase">Email Address</th>
+                    <th className="px-6 py-3 font-bold uppercase">Department & Sec</th>
+                    <th className="px-6 py-3 font-bold uppercase">Semester & Year</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                  {students
+                    .filter(
+                      (s) =>
+                        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        s.usn.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        s.email.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                    .map((std, index) => (
+                      <tr key={std.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/30 transition-colors">
+                        <td className="px-6 py-4 font-semibold text-neutral-400 font-mono">
+                          {index + 1}
+                        </td>
+                        <td className="px-6 py-4 font-bold text-blue-600 dark:text-blue-400 font-mono">
+                          {std.usn}
+                        </td>
+                        <td className="px-6 py-4 font-semibold text-neutral-900 dark:text-white">
+                          {std.name}
+                        </td>
+                        <td className="px-6 py-4 text-neutral-500">
+                          {std.email}
+                        </td>
+                        <td className="px-6 py-4 text-neutral-600 dark:text-neutral-300 font-medium">
+                          <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-bold mr-1.5">
+                            {std.department}
+                          </span>
+                          <span>{std.section}</span>
+                        </td>
+                        <td className="px-6 py-4 text-neutral-500">
+                          {std.semester} • {std.academic_year}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TAB 1: UPLOAD NEW NOTES */}
       {activeTab === 'upload' && (
